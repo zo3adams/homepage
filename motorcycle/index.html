@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Racing Sim with Procedural Track</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+
+        .logo-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #gameCanvas {
+            background-color: #4a4a4a;
+            border: 2px solid #222;
+        }
+        #dashboard {
+            position: absolute;
+            bottom: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="logo-container">
+            <img src="images/logo.png" alt="Game Logo" width="200" height="200">
+        </div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
+
+    <div id="dashboard">
+        <div>Speed: <span id="speed">0</span> mph</div>
+        <div>Distance: <span id="distance">0</span> m</div>
+        <div>Use ← → to steer, ↑ or SPACE for gas and ↓ or z for brakes </div>
+    </div>
+
+    <script>
+        // Game elements
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const speedElement = document.getElementById('speed');
+        const distanceElement = document.getElementById('distance');
+        
+        // Game state
+        const state = {
+            car: {
+                x: canvas.width / 2,
+                y: canvas.height - 100,
+                width: 40,
+                height: 100,
+                angle: 0,
+                speed: 0,
+                maxSpeed: 12,
+                acceleration: 0.02,
+                deceleration: 0.05,
+                turnSpeed: 0.05,
+                xPosition: 0.2 // Lateral position on track (-1 to 1)
+            },
+            track: {
+                width: 300,
+                roadColor: '#3C3C3C',
+                lineColor: '#FFFFFF',
+                lineWidth: 5,
+                lineGap: 30,
+                lineLength: 20,
+                segments: [],
+                segmentLength: 100,
+                segmentCount: 20,
+                curvature: 0,
+                targetCurvature: 0,
+                maxCurvature: 0.002,
+                curveChangeRate: 0.0005,
+                distance: 0,
+                scrollSpeed: 5
+            },
+            scenery: {
+                trees: [],
+                rocks: [],
+                grassColor: '#4A7023',
+                maxElements: 60
+            },
+            controls: {
+                left: false,
+                right: false,
+                gas: false,
+                brake: false,
+            },
+            gameLoop: null
+        };
+
+        // Generate a random number within a range
+        function random(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // Initialize track segments
+        function initTrack() {
+            for (let i = 0; i < state.track.segmentCount; i++) {
+                state.track.segments.push({
+                    curve: state.track.curvature * i / 10,
+                    y: i * state.track.segmentLength
+                });
+            }
+            
+            // Initialize scenery
+            for (let i = 0; i < 30; i++) {
+                // Add trees
+                if (Math.random() > 0.2) {
+                    state.scenery.trees.push({
+                        x: random(-1, 1) > 0 ? random(canvas.width / 2 + state.track.width / 2 + 20, canvas.width - 50) :
+                                               random(50, canvas.width / 2 - state.track.width / 2 - 20),
+                        y: random(0, canvas.height * 2),
+                        size: random(30, 60),
+                        type: Math.floor(random(0, 3))
+                    });
+                }
+                
+                // Add rocks
+                if (Math.random() > 0.4) {
+                    state.scenery.rocks.push({
+                        x: random(-1, 1) > 0 ? random(canvas.width / 2 + state.track.width / 2 + 10, canvas.width - 30) :
+                                               random(30, canvas.width / 2 - state.track.width / 2 - 10),
+                        y: random(0, canvas.height * 2),
+                        size: random(15, 30),
+                        type: Math.floor(random(0, 2))
+                    });
+                }
+            }
+        }
+
+        // Handle key events
+        function setupControls() {
+            document.addEventListener('keydown', (event) => {
+                switch (event.key) {
+                    case 'ArrowLeft':
+                        state.controls.left = true;
+                        break;
+                    case 'ArrowRight':
+                        state.controls.right = true;
+                        break;
+                    case ' ':
+                    case 'ArrowUp':
+                        state.controls.gas = true;
+                        break;
+                    case 'z':
+                    case 'ArrowDown':
+                        state.controls.brake = true;
+                        break;
+                }
+            });
+
+            document.addEventListener('keyup', (event) => {
+                switch (event.key) {
+                    case 'ArrowLeft':
+                        state.controls.left = false;
+                        break;
+                    case 'ArrowRight':
+                        state.controls.right = false;
+                        break;
+                        case ' ':
+                    case 'ArrowUp':
+                        state.controls.gas = false;
+                        break;
+                    case 'z':
+                    case 'ArrowDown':
+                        state.controls.brake = false;
+                        break;
+                }
+            });
+        }
+
+        // Update game state
+        function update() {
+            // Update track curvature
+            if (Math.random() < 0.01) {
+                state.track.targetCurvature = random(-state.track.maxCurvature, state.track.maxCurvature);
+            }
+            
+            // Gradually change track curvature towards target
+            if (state.track.curvature < state.track.targetCurvature) {
+                state.track.curvature = Math.min(state.track.curvature + state.track.curveChangeRate, state.track.targetCurvature);
+            } else if (state.track.curvature > state.track.targetCurvature) {
+                state.track.curvature = Math.max(state.track.curvature - state.track.curveChangeRate, state.track.targetCurvature);
+            }
+
+            // Handle steering
+            if (state.controls.left) {
+                state.car.xPosition -= 0.02 * (state.car.speed / 3);
+                state.car.angle = state.track.curvature * 10 + state.car.xPosition * 0.5;
+            }
+            if (state.controls.right) {
+                state.car.xPosition += 0.02 * (state.car.speed / 3);
+                state.car.angle = state.track.curvature * 10 + state.car.xPosition * 0.5;
+            }
+
+            if (!state.controls.left && !state.controls.right) {
+                if (state.car.angle > 0) {
+                    state.car.angle -= 0.01;
+                } else if (state.car.angle < 0) {
+                    state.car.angle += 0.01;
+                }
+                
+            }
+            
+            // if car is off track slow it a LOT
+            //state.car.xPosition = Math.max(-0.9, Math.min(0.9, state.car.xPosition));
+            if (state.car.xPosition > 0.9 || state.car.xPosition < -0.9) {
+                state.car.speed -= state.car.deceleration*4;   
+                if (state.car.speed < 0) {
+                    state.car.speed = 0;
+
+                    if (state.car.xPosition > 0.9 ) {
+                        state.car.xPosition -= 0.2;
+                    } else {
+                        state.car.xPosition += 0.2;
+                    }
+                }         
+                
+                
+            }
+
+            // Handle acceleration and deceleration
+            if (state.controls.gas) {
+                state.car.speed += state.car.acceleration;
+                if (state.car.speed > state.car.maxSpeed) {
+                    state.car.speed = state.car.maxSpeed;
+                }
+            } else if (state.controls.brake) {
+                state.car.speed -= state.car.deceleration * 3;
+                if (state.car.speed < 0) {
+                    state.car.speed = 0;
+                }
+            
+            } else {
+                state.car.speed -= state.car.deceleration;
+                if (state.car.speed < 0) {
+                    state.car.speed = 0;
+                }
+            }
+
+            // Update car position based on speed and track            
+            state.car.x = canvas.width / 2 + state.car.xPosition * (state.track.width / 2);
+
+            // Update track scroll based on car speed
+            if (state.car.speed > 0) {
+                state.track.distance += state.car.speed;
+                
+                // Scroll track segments
+                for (let i = 0; i < state.track.segments.length; i++) {
+                    state.track.segments[i].y += state.car.speed * state.track.scrollSpeed;
+                    
+                    // Reset segment when it scrolls off screen
+                    if (state.track.segments[i].y > canvas.height + state.track.segmentLength) {
+                        state.track.segments[i].y = state.track.segments[i].y - (state.track.segmentLength * state.track.segmentCount);
+                        state.track.segments[i].curve = state.track.curvature * i / 10;
+                    }
+                }
+                
+                // Scroll scenery
+                // Trees
+                for (let i = 0; i < state.scenery.trees.length; i++) {
+                    state.scenery.trees[i].y += state.car.speed * state.track.scrollSpeed;
+                    
+                    // Reset tree when it scrolls off screen
+                    if (state.scenery.trees[i].y > canvas.height + 100) {
+                        state.scenery.trees[i].y = -100;
+                        state.scenery.trees[i].x = random(-1, 1) > 0 ? 
+                            random(canvas.width / 2 + state.track.width / 2 + 20, canvas.width - 50) :
+                            random(50, canvas.width / 2 - state.track.width / 2 - 20);
+                        state.scenery.trees[i].size = random(30, 60);
+                        state.scenery.trees[i].type = Math.floor(random(0, 3));
+                    }
+                }
+                
+                // Rocks
+                for (let i = 0; i < state.scenery.rocks.length; i++) {
+                    state.scenery.rocks[i].y += state.car.speed * state.track.scrollSpeed;
+                    
+                    // Reset rock when it scrolls off screen
+                    if (state.scenery.rocks[i].y > canvas.height + 50) {
+                        state.scenery.rocks[i].y = -50;
+                        state.scenery.rocks[i].x = random(-1, 1) > 0 ? 
+                            random(canvas.width / 2 + state.track.width / 2 + 10, canvas.width - 30) :
+                            random(30, canvas.width / 2 - state.track.width / 2 - 10);
+                        state.scenery.rocks[i].size = random(15, 30);
+                        state.scenery.rocks[i].type = Math.floor(random(0, 2));
+                    }
+                }
+            }
+
+            // Update dashboard
+            speedElement.textContent = Math.floor(state.car.speed * 10);
+            distanceElement.textContent = Math.floor(state.track.distance);
+        }
+
+        // Draw a single frame
+        function draw() {
+            // Clear canvas with grass color
+            ctx.fillStyle = state.scenery.grassColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw distant hills
+            drawHills();
+            
+            // Draw rocks (behind the track)
+            drawRocks();
+            
+            // Draw track
+            drawTrack();
+            
+            // Draw trees (in front of track)
+            drawTrees();
+            
+            // Draw car
+            drawCar();
+        }
+
+        // Draw the background hills
+        function drawHills() {
+            const hillColor = '#2D4314';
+            ctx.fillStyle = hillColor;
+            
+            // Draw multiple hills in background
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height / 2);
+            
+            // First set of hills
+            for (let i = 0; i < canvas.width; i += 100) {
+                ctx.quadraticCurveTo(i + 50, canvas.height / 2 - 40 - Math.sin(i / 500 + state.track.distance / 1000) * 20, i + 100, canvas.height / 2);
+            }
+            
+            ctx.lineTo(canvas.width, canvas.height);
+            ctx.lineTo(0, canvas.height);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Draw rocks
+        function drawRocks() {
+            state.scenery.rocks.forEach(rock => {
+                if (rock.y < canvas.height && rock.y > -50) {
+                    ctx.fillStyle = '#7D7D7D';
+                    
+                    if (rock.type === 0) {
+                        // Round rock
+                        ctx.beginPath();
+                        ctx.arc(rock.x, rock.y, rock.size, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Add shadow detail
+                        ctx.fillStyle = '#5D5D5D';
+                        ctx.beginPath();
+                        ctx.arc(rock.x + rock.size / 4, rock.y + rock.size / 4, rock.size / 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                        // Angular rock
+                        ctx.beginPath();
+                        ctx.moveTo(rock.x, rock.y - rock.size);
+                        ctx.lineTo(rock.x + rock.size, rock.y - rock.size / 3);
+                        ctx.lineTo(rock.x + rock.size / 2, rock.y + rock.size);
+                        ctx.lineTo(rock.x - rock.size / 2, rock.y + rock.size / 2);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        // Add shadow detail
+                        ctx.fillStyle = '#5D5D5D';
+                        ctx.beginPath();
+                        ctx.moveTo(rock.x + rock.size / 4, rock.y);
+                        ctx.lineTo(rock.x + rock.size / 2, rock.y + rock.size / 2);
+                        ctx.lineTo(rock.x, rock.y + rock.size / 3);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+            });
+        }
+
+        // Draw trees
+        function drawTrees() {
+            state.scenery.trees.forEach(tree => {
+                if (tree.y < canvas.height && tree.y > -100) {
+                    // Draw trunk
+                    ctx.fillStyle = '#5D3A1A';
+                    ctx.fillRect(tree.x - tree.size / 10, tree.y, tree.size / 5, tree.size);
+                    
+                    if (tree.type === 0) {
+                        // Pine tree
+                        const leafColor = '#2A5E23';
+                        ctx.fillStyle = leafColor;
+                        
+                        // Draw triangular sections
+                        for (let i = 0; i < 3; i++) {
+                            const sectionHeight = tree.size * 0.6;
+                            const yOffset = tree.y - (i * sectionHeight / 2);
+                            const width = tree.size * (1 - i * 0.2);
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(tree.x, yOffset - sectionHeight);
+                            ctx.lineTo(tree.x + width / 2, yOffset);
+                            ctx.lineTo(tree.x - width / 2, yOffset);
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    } else if (tree.type === 1) {
+                        // Round tree
+                        ctx.fillStyle = '#3B7D36';
+                        ctx.beginPath();
+                        ctx.arc(tree.x, tree.y - tree.size * 0.7, tree.size * 0.6, 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                        // Bushy tree
+                        ctx.fillStyle = '#4D8E45';
+                        
+                        // Draw multiple circles for leaves
+                        const centers = [
+                            {x: tree.x - tree.size * 0.3, y: tree.y - tree.size * 0.5},
+                            {x: tree.x + tree.size * 0.3, y: tree.y - tree.size * 0.5},
+                            {x: tree.x, y: tree.y - tree.size * 0.8},
+                            {x: tree.x - tree.size * 0.15, y: tree.y - tree.size * 0.3},
+                            {x: tree.x + tree.size * 0.15, y: tree.y - tree.size * 0.3}
+                        ];
+                        
+                        centers.forEach(center => {
+                            ctx.beginPath();
+                            ctx.arc(center.x, center.y, tree.size * 0.3, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
+                    }
+                }
+            });
+        }
+
+        // Draw the racetrack
+        function drawTrack() {
+            // Sort segments by y position for proper rendering
+            const sortedSegments = [...state.track.segments].sort((a, b) => a.y - b.y);
+            
+            // Accumulate total curvature
+            let totalCurve = 0;
+            
+            // Draw each track segment
+            ctx.save(); 
+            sortedSegments.forEach(segment => {
+                if (segment.y <= canvas.height && segment.y + state.track.segmentLength >= 0) {
+                    // Calculate offset based on accumulated curve
+                    totalCurve += segment.curve;
+                    
+                    // Calculate center of track segment
+                    const centerX = canvas.width / 2 + totalCurve * 10 * (segment.y - canvas.height / 2);
+                    // Calculate the angle of this segment based on curve
+                    const segmentAngle = Math.atan2(segment.curve * -500, state.track.segmentLength);                                                       
+                    ctx.rotate(segmentAngle);
+                            
+                    // Draw road
+                    ctx.fillStyle = state.track.roadColor;
+                    ctx.fillRect(
+                        centerX - state.track.width / 2, 
+                        segment.y, 
+                        state.track.width, 
+                        state.track.segmentLength
+                    );
+                    
+                    // Draw center line
+                    if (Math.floor((segment.y + state.track.distance) / state.track.lineGap) % 2 === 0) {
+                        ctx.fillStyle = state.track.lineColor;
+                        ctx.fillRect(
+                            centerX - state.track.lineWidth / 2, 
+                            segment.y, 
+                            state.track.lineWidth, 
+                            state.track.lineLength
+                        );
+                    }
+                    
+                    // Draw side lines
+                    ctx.fillStyle = state.track.lineColor;
+                    ctx.fillRect(
+                        centerX   - state.track.width / 2, 
+                        segment.y, 
+                        state.track.lineWidth, 
+                        state.track.segmentLength
+                    );
+                    ctx.fillRect(
+                        centerX + state.track.width / 2 - state.track.lineWidth, 
+                        segment.y, 
+                        state.track.lineWidth, 
+                        state.track.segmentLength
+                    );
+
+                    
+                }
+                
+            });
+            ctx.restore();
+
+            
+        }
+
+        // Draw the player's car
+        // Draw the player's motorcycle
+        function drawCar() {
+            ctx.save();
+            
+            // Translate to bike position and rotate
+            ctx.translate(state.car.x, state.car.y);
+            ctx.rotate(state.car.angle);
+            
+            // Draw bike shadow
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.beginPath();
+            ctx.ellipse(-2, 5, state.car.width * 0.9, state.car.height * 0.3, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Front wheel
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.fillRect(-state.car.width / 10, -state.car.height / 2 + 1, state.car.width/5, state.car.height/4);
+
+            // Rear wheel
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.fillRect(-state.car.width / 8, -state.car.height/ 50 + 20, state.car.width/4, state.car.height/4);
+
+            // Tank
+            ctx.fillStyle = '#FF0000';
+            ctx.beginPath();
+            ctx.ellipse(0, -14, state.car.width * 0.3, state.car.height * 0.20, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Tail
+            ctx.fillStyle =  '#FF0000';
+            ctx.beginPath();
+            ctx.fillRect(-state.car.width / 4, state.car.height/5-15, state.car.width * 0.5, state.car.height/4);
+
+             // Handlebars
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(-state.car.width/2, -state.car.height * 0.6+30);
+            ctx.lineTo(0, -state.car.height * 0.55+30);
+            ctx.lineTo(state.car.width/2, -state.car.height * 0.6+30);
+
+            ctx.stroke();
+
+
+            //racing stripe
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, -state.car.height/5);
+
+
+            ctx.stroke();
+
+                                    
+            ctx.restore();
+        }
+
+        // Main game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize and start the game
+        function startGame() {
+            setupControls();
+            initTrack();
+            gameLoop();
+        }
+
+        // Start the game when page loads
+        window.onload = startGame;
+    </script>
+</body>
+</html>
