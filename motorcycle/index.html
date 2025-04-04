@@ -52,7 +52,8 @@
 
     <div id="dashboard">
         <div>Speed: <span id="speed">0</span> mph</div>
-        <div>Distance: <span id="distance">0</span> m</div>
+        <div>Distance: <span id="distance">0</span> miles</div>
+        <div> Score: <span id="score">0</span>, Max Score: <span id="max_score">0</span></div>
         <div>Use ← → to steer, ↑ or SPACE for gas and ↓ or z for brakes </div>
     </div>
 
@@ -62,6 +63,8 @@
         const ctx = canvas.getContext('2d');
         const speedElement = document.getElementById('speed');
         const distanceElement = document.getElementById('distance');
+        const scoreElement = document.getElementById('score');
+        const maxScoreElement = document.getElementById('max_score');
         
         // Game state
         const state = {
@@ -76,7 +79,9 @@
                 acceleration: 0.02,
                 deceleration: 0.05,
                 turnSpeed: 0.05,
-                xPosition: 0.2 // Lateral position on track (-1 to 1)
+                xPosition: 0.2, // Lateral position on track (-1 to 1)
+                score: 0,
+                maxScoreSeen: 0
             },
             track: {
                 width: 300,
@@ -90,16 +95,17 @@
                 segmentCount: 20,
                 curvature: 0,
                 targetCurvature: 0,
-                maxCurvature: 0.002,
+                maxCurvature: 0.003,
                 curveChangeRate: 0.0005,
                 distance: 0,
-                scrollSpeed: 5
+                scrollSpeed: 5,
+                centerX: 0
             },
             scenery: {
                 trees: [],
                 rocks: [],
                 grassColor: '#4A7023',
-                maxElements: 60
+                maxElements: 40
             },
             controls: {
                 left: false,
@@ -226,19 +232,26 @@
             
             // if car is off track slow it a LOT
             //state.car.xPosition = Math.max(-0.9, Math.min(0.9, state.car.xPosition));
-            if (state.car.xPosition > 0.9 || state.car.xPosition < -0.9) {
+            let distance_from_center = ((400 - state.track.centerX)/100) + state.car.xPosition;
+            state.car.score  += (state.car.speed - (state.car.speed * (0.3-distance_from_center)))/100;
+            
+            if (distance_from_center > 0.75 || distance_from_center < -0.75) {
                 state.car.speed -= state.car.deceleration*4;   
                 if (state.car.speed < 0) {
                     state.car.speed = 0;
 
-                    if (state.car.xPosition > 0.9 ) {
+                    if (distance_from_center > 0.75 ) {
                         state.car.xPosition -= 0.2;
                     } else {
                         state.car.xPosition += 0.2;
                     }
-                }         
+                }        
                 
-                
+                if (state.car.score > 1000) {
+                    state.car.score -= 1000;
+                } else {
+                    state.car.score = 0;
+                }                
             }
 
             // Handle acceleration and deceleration
@@ -260,12 +273,14 @@
                 }
             }
 
+           
+
             // Update car position based on speed and track            
             state.car.x = canvas.width / 2 + state.car.xPosition * (state.track.width / 2);
 
             // Update track scroll based on car speed
             if (state.car.speed > 0) {
-                state.track.distance += state.car.speed;
+                state.track.distance += state.car.speed / 10000 ;
                 
                 // Scroll track segments
                 for (let i = 0; i < state.track.segments.length; i++) {
@@ -313,6 +328,13 @@
             // Update dashboard
             speedElement.textContent = Math.floor(state.car.speed * 10);
             distanceElement.textContent = Math.floor(state.track.distance);
+
+            scoreElement.textContent =  Math.floor(state.car.score);
+            if (state.car.maxScoreSeen < state.car.score) {
+                state.car.maxScoreSeen = state.car.score;
+            }
+            maxScoreElement.textContent = Math.floor(state.car.maxScoreSeen);
+            
         }
 
         // Draw a single frame
@@ -469,6 +491,8 @@
                     
                     // Calculate center of track segment
                     const centerX = canvas.width / 2 + totalCurve * 10 * (segment.y - canvas.height / 2);
+                    state.track.centerX = centerX;
+
                     // Calculate the angle of this segment based on curve
                     const segmentAngle = Math.atan2(segment.curve * -500, state.track.segmentLength);                                                       
                     ctx.rotate(segmentAngle);
@@ -586,6 +610,7 @@
 
         // Initialize and start the game
         function startGame() {
+            maxScoreElement.textContent = "0";
             setupControls();
             initTrack();
             gameLoop();
