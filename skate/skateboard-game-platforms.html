@@ -1,0 +1,2286 @@
+    <script>
+        // Game Setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const bottleCapDisplay = document.getElementById('bottlecaps');
+        
+        // Set canvas size to window dimensions
+        canvas.width = 800;
+        canvas.height = 600;
+        
+        // Game constants
+        const GRAVITY = 0.5;
+        const GROUND_LEVEL = canvas.height - 50;
+        
+        // Camera/viewport
+        const camera = {
+            x: 0,
+            y: 0,
+            width: canvas.width,
+            height: canvas.height,
+            leftLimit: 200,    // Left side camera boundary
+            rightLimit: 500,   // Right side camera boundary
+            topLimit: 200,     // Top side camera boundary
+            bottomLimit: 400,  // Bottom side camera boundary
+            
+            // Update camera position based on player position
+            update(player, worldWidth, worldHeight) {
+                // Horizontal scrolling
+                if (player.x < this.x + this.leftLimit) {
+                    this.x = Math.max(0, player.x - this.leftLimit);
+                } else if (player.x > this.x + this.rightLimit) {
+                    this.x = Math.min(worldWidth - this.width, player.x - this.rightLimit);
+                }
+                
+                // Vertical scrolling
+                if (player.y < this.y + this.topLimit) {
+                    this.y = Math.max(0, player.y - this.topLimit);
+                } else if (player.y > this.y + this.bottomLimit) {
+                    this.y = Math.min(worldHeight - this.height, player.y - this.bottomLimit);
+                }
+            }
+        };
+        
+        // World dimensions
+        let worldWidth = 3000;
+        const worldHeight = 1500;
+        
+        // Level chunk size for procedural generation
+        const chunkSize = 1000;
+        const generationDistance = 2000; // Generate ahead of player
+        
+        // Procedural generation variables
+        let lastGeneratedX = 0;
+        
+        // Platform class
+        class Platform {
+            constructor(x, y, width, height, type = 'platform', color = '#555') {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.type = type; // platform, car, rooftop, sign, etc.
+                this.color = color;
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Only draw if in viewport
+                if (screenX + this.width > 0 && 
+                    screenX < canvas.width && 
+                    screenY + this.height > 0 && 
+                    screenY < canvas.height) {
+                    
+                    ctx.fillStyle = this.color;
+                    
+                    if (this.type === 'car') {
+                        // Draw car
+                        ctx.fillRect(screenX, screenY, this.width, this.height * 0.6); // Car body
+                        
+                        // Car details
+                        ctx.fillStyle = '#222';
+                        ctx.fillRect(screenX + this.width * 0.1, screenY + this.height * 0.1, this.width * 0.3, this.height * 0.25); // Window
+                        ctx.fillRect(screenX + this.width * 0.6, screenY + this.height * 0.1, this.width * 0.3, this.height * 0.25); // Window
+                        
+                        // Wheels
+                        ctx.fillStyle = '#333';
+                        ctx.beginPath();
+                        ctx.arc(screenX + this.width * 0.2, screenY + this.height * 0.6, this.height * 0.2, 0, Math.PI * 2);
+                        ctx.arc(screenX + this.width * 0.8, screenY + this.height * 0.6, this.height * 0.2, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                    } else if (this.type === 'rooftop') {
+                        // Draw rooftop
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                        
+                        // Roof details (air vents, etc.)
+                        ctx.fillStyle = '#777';
+                        ctx.fillRect(screenX + this.width * 0.2, screenY + this.height * 0.3, this.width * 0.1, this.height * 0.4);
+                        ctx.fillRect(screenX + this.width * 0.6, screenY + this.height * 0.1, this.width * 0.15, this.height * 0.25);
+                        
+                    } else if (this.type === 'sign') {
+                        // Draw sign pole
+                        ctx.fillStyle = '#999';
+                        ctx.fillRect(screenX + this.width / 2 - 5, screenY + this.height * 0.5, 10, this.height * 0.5);
+                        
+                        // Sign board
+                        ctx.fillStyle = this.color;
+                        ctx.fillRect(screenX, screenY, this.width, this.height * 0.5);
+                        
+                        // Sign text (simplified)
+                        ctx.fillStyle = '#fff';
+                        ctx.font = '12px Arial';
+                        ctx.fillText("SKATE SHOP", screenX + 10, screenY + this.height * 0.3);
+                        
+                    } else if (this.type === 'beam') {
+                        // Construction beam
+                        ctx.fillStyle = '#b25e00';
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                        
+                        // Rivets
+                        ctx.fillStyle = '#888';
+                        for (let i = 1; i < this.width / 20; i++) {
+                            ctx.beginPath();
+                            ctx.arc(screenX + i * 20, screenY + 5, 3, 0, Math.PI * 2);
+                            ctx.arc(screenX + i * 20, screenY + this.height - 5, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    } else {
+                        // Regular platform
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                    }
+                }
+            }
+        }
+        
+        // Background element class
+        class BackgroundElement {
+            constructor(x, y, type, width, height) {
+                this.x = x;
+                this.y = y;
+                this.type = type; // building, tree, graffiti, etc.
+                this.width = width;
+                this.height = height;
+                this.parallaxFactor = 0.6; // Slower movement for background
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                // Apply parallax effect
+                const screenX = this.x - cameraX * this.parallaxFactor;
+                const screenY = this.y - cameraY * this.parallaxFactor;
+                
+                // Only draw if in viewport with some buffer
+                if (screenX + this.width > -200 && 
+                    screenX < canvas.width + 200 && 
+                    screenY + this.height > -200 && 
+                    screenY < canvas.height + 200) {
+                    
+                    if (this.type === 'building') {
+                        // Draw building
+                        ctx.fillStyle = '#444';
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                        
+                        // Windows
+                        ctx.fillStyle = '#666';
+                        const windowWidth = 15;
+                        const windowHeight = 20;
+                        const windowSpacingX = 30;
+                        const windowSpacingY = 40;
+                        
+                        for (let x = 20; x < this.width - 20; x += windowSpacingX) {
+                            for (let y = 20; y < this.height - 40; y += windowSpacingY) {
+                                ctx.fillRect(screenX + x, screenY + y, windowWidth, windowHeight);
+                            }
+                        }
+                        
+                    } else if (this.type === 'tree') {
+                        // Draw tree trunk
+                        ctx.fillStyle = '#8B4513';
+                        ctx.fillRect(screenX + this.width/2 - 5, screenY + this.height/2, 10, this.height/2);
+                        
+                        // Tree foliage
+                        ctx.fillStyle = '#006400';
+                        ctx.beginPath();
+                        ctx.arc(screenX + this.width/2, screenY + this.height/2, this.width/3, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                    } else if (this.type === 'graffiti') {
+                        // Graffiti is just colorful shapes for visual effect
+                        ctx.fillStyle = this.getRandomColor();
+                        ctx.beginPath();
+                        ctx.moveTo(screenX, screenY);
+                        ctx.lineTo(screenX + this.width, screenY + this.height/3);
+                        ctx.lineTo(screenX + this.width/2, screenY + this.height);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        ctx.fillStyle = this.getRandomColor();
+                        ctx.beginPath();
+                        ctx.arc(screenX + this.width/2, screenY + this.height/2, this.width/4, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            getRandomColor() {
+                const colors = ['#FF5555', '#55FF55', '#5555FF', '#FFFF55', '#FF55FF', '#55FFFF'];
+                return colors[Math.floor(this.x * this.y) % colors.length]; // Deterministic based on position
+            }
+        }
+        
+        // Player class
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 60;
+                this.speedX = 0;
+                this.speedY = 0;
+                this.maxSpeedX = 6;
+                this.jumpForce = -15;
+                this.isJumping = false;
+                this.canDoubleJump = false;
+                this.hasDoubleJumped = false;
+                this.health = 100;
+                this.invulnerable = 0;
+                this.bottleCaps = 10;
+                this.direction = 1; // 1 for right, -1 for left
+                this.isAttacking = false;
+                this.attackCooldown = 0;
+                this.jumpAttackActive = false;
+                this.isFalling = false;
+                this.jumpPeak = false;
+                this.fallDistance = 0;
+                this.lastY = y;
+                this.currentPlatform = null;
+            }
+            
+            update(platforms) {
+                // Store last Y position to calculate fall distance
+                this.lastY = this.y;
+                
+                // Apply gravity
+                this.speedY += GRAVITY;
+                
+                // Apply speeds
+                this.x += this.speedX;
+                this.y += this.speedY;
+                
+                // Check world boundaries
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.width > worldWidth) this.x = worldWidth - this.width;
+                
+                // Platform collision
+                let onPlatform = false;
+                this.currentPlatform = null;
+                
+                for (const platform of platforms) {
+                    // Check if player is on a platform
+                    if (this.speedY >= 0 && // Only when moving down/falling
+                        this.lastY + this.height <= platform.y && // Was above platform in last frame
+                        this.x + this.width > platform.x && 
+                        this.x < platform.x + platform.width && 
+                        this.y + this.height >= platform.y && 
+                        this.y + this.height <= platform.y + platform.height/2) {
+                        
+                        this.y = platform.y - this.height;
+                        this.speedY = 0;
+                        onPlatform = true;
+                        this.isJumping = false;
+                        this.jumpAttackActive = false;
+                        this.isFalling = false;
+                        this.jumpPeak = false;
+                        this.canDoubleJump = false;
+                        this.hasDoubleJumped = false;
+                        this.currentPlatform = platform;
+                        break;
+                    }
+                    
+                    // Very simple side collision (can be improved)
+                    if (this.x + this.width > platform.x && 
+                        this.x < platform.x + platform.width && 
+                        this.y + this.height > platform.y && 
+                        this.y < platform.y + platform.height) {
+                        
+                        // Only handle side collision if not landing on top
+                        if (!onPlatform) {
+                            // Left side collision
+                            if (this.speedX > 0 && this.x + this.width > platform.x && this.lastY + this.height > platform.y) {
+                                this.x = platform.x - this.width;
+                                this.speedX = 0;
+                            }
+                            // Right side collision
+                            else if (this.speedX < 0 && this.x < platform.x + platform.width && this.lastY + this.height > platform.y) {
+                                this.x = platform.x + platform.width;
+                                this.speedX = 0;
+                            }
+                        }
+                    }
+                }
+                
+                // Ground collision (if not on platform)
+                if (!onPlatform) {
+                    if (this.y + this.height > GROUND_LEVEL) {
+                        this.y = GROUND_LEVEL - this.height;
+                        this.speedY = 0;
+                        this.isJumping = false;
+                        this.jumpAttackActive = false;
+                        this.isFalling = false;
+                        this.jumpPeak = false;
+                        this.canDoubleJump = false;
+                        this.hasDoubleJumped = false;
+                    }
+                }
+                
+                // Jumping and falling states
+                if (this.isJumping) {
+                    if (this.speedY > 0) {
+                        this.isFalling = true;
+                        
+                        // Check for jump peak (when starting to fall)
+                        if (!this.jumpPeak) {
+                            this.jumpPeak = true;
+                        }
+                    }
+                }
+                
+                // Calculate fall distance (only when falling)
+                if (this.isFalling) {
+                    this.fallDistance = this.y - this.lastY;
+                    
+                    // Jump attack is active during the first half of the fall
+                    this.jumpAttackActive = this.fallDistance > 1.5 && this.fallDistance < 8;
+                }
+                
+                // Update attack cooldown
+                if (this.attackCooldown > 0) {
+                    this.attackCooldown--;
+                    if (this.attackCooldown === 0) {
+                        this.isAttacking = false;
+                    }
+                }
+                
+                // Update invulnerability frames
+                if (this.invulnerable > 0) {
+                    this.invulnerable--;
+                }
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Invulnerability blinking effect
+                if (this.invulnerable > 0 && Math.floor(this.invulnerable / 5) % 2 === 0) {
+                    ctx.globalAlpha = 0.5;
+                }
+                
+                // Debug visualization for jump attack
+                if (this.jumpAttackActive) {
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                    ctx.fillRect(screenX - 5, screenY + this.height - 10, this.width + 10, 15);
+                }
+                
+                // Body - side view
+                ctx.fillStyle = '#000'; // Black jacket
+                ctx.fillRect(screenX + 5, screenY, 20, 30);
+                
+                ctx.fillStyle = '#fff'; // White t-shirt
+                ctx.fillRect(screenX + 3, screenY + 5, 5, 20);
+                
+                ctx.fillStyle = '#000066'; // Blue jeans
+                ctx.fillRect(screenX + 5, screenY + 30, 20, 20);
+                
+                // Head
+                ctx.fillStyle = '#FFD3B4'; // Skin tone
+                ctx.beginPath();
+                ctx.arc(screenX + (this.direction > 0 ? 20 : 10), screenY - 5, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Mohawk
+                ctx.fillStyle = '#ff0066'; // Pink mohawk
+                ctx.beginPath();
+                if (this.direction > 0) {
+                    // Right-facing mohawk
+                    ctx.moveTo(screenX + 20, screenY - 10);
+                    ctx.lineTo(screenX + 25, screenY - 20);
+                    ctx.lineTo(screenX + 20, screenY - 15);
+                    ctx.lineTo(screenX + 28, screenY - 22);
+                } else {
+                    // Left-facing mohawk
+                    ctx.moveTo(screenX + 10, screenY - 10);
+                    ctx.lineTo(screenX + 5, screenY - 20);
+                    ctx.lineTo(screenX + 10, screenY - 15);
+                    ctx.lineTo(screenX + 2, screenY - 22);
+                }
+                ctx.fill();
+                
+                // Skateboard
+                ctx.fillStyle = '#333'; // Board
+                ctx.fillRect(screenX - 10, screenY + this.height - 10, 50, 5);
+                
+                // Wheels
+                ctx.fillStyle = '#f00'; // Red wheels
+                ctx.beginPath();
+                ctx.arc(screenX, screenY + this.height - 5, 4, 0, Math.PI * 2);
+                ctx.arc(screenX + 30, screenY + this.height - 5, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Bottle cap pouch
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(screenX + (this.direction > 0 ? 25 : -5), screenY + 20, 8, 12);
+                
+                // Attacking animation (throw)
+                if (this.isAttacking) {
+                    ctx.fillStyle = '#000';
+                    // Arm extended for throwing
+                    ctx.beginPath();
+                    if (this.direction > 0) {
+                        ctx.moveTo(screenX + 20, screenY + 15);
+                        ctx.lineTo(screenX + 35, screenY + 20);
+                    } else {
+                        ctx.moveTo(screenX + 10, screenY + 15);
+                        ctx.lineTo(screenX - 5, screenY + 20);
+                    }
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+                
+                // Health bar
+                ctx.fillStyle = 'black';
+                ctx.fillRect(screenX - 5, screenY - 30, 40, 5);
+                ctx.fillStyle = this.health > 50 ? 'green' : this.health > 25 ? 'orange' : 'red';
+                ctx.fillRect(screenX - 5, screenY - 30, 40 * (this.health/100), 5);
+                
+                // Reset opacity
+                ctx.globalAlpha = 1;
+            }
+            
+            jump() {
+                if (!this.isJumping) {
+                    // First jump
+                    this.isJumping = true;
+                    this.speedY = this.jumpForce;
+                    this.isFalling = false;
+                    this.jumpPeak = false;
+                    this.fallDistance = 0;
+                    this.canDoubleJump = true;
+                    this.hasDoubleJumped = false;
+                } else if (this.canDoubleJump && !this.hasDoubleJumped) {
+                    // Double jump
+                    this.speedY = -10; // Same force as bouncing off enemies
+                    this.canDoubleJump = false;
+                    this.hasDoubleJumped = true;
+                }
+            }
+            
+            throwBottleCap() {
+                if (this.bottleCaps > 0 && !this.isAttacking) {
+                    this.bottleCaps--;
+                    this.isAttacking = true;
+                    this.attackCooldown = 20;
+                    bottleCapDisplay.textContent = this.bottleCaps;
+                    return new BottleCap(
+                        this.x + (this.direction > 0 ? this.width + 5 : -15), 
+                        this.y + 15, 
+                        this.direction
+                    );
+                }
+                return null;
+            }
+            
+            takeDamage(amount) {
+                if (this.invulnerable <= 0) {
+                    this.health -= amount;
+                    this.invulnerable = 60; // 1 second of invulnerability
+                    
+                    // Update health display
+                    document.getElementById('health').textContent = this.health;
+                    
+                    if (this.health <= 0) {
+                        // Game over logic here
+                        alert("Game Over! Refresh to restart.");
+                        window.location.reload();
+                    }
+                }
+            }
+            
+            // Check if player's skateboard is hitting an enemy during jump attack
+            checkJumpAttack(enemy) {
+                if (!this.jumpAttackActive) return false;
+                
+                // The "attack box" is at the bottom of the player (skateboard)
+                const attackBox = {
+                    x: this.x - 5,
+                    y: this.y + this.height - 10,
+                    width: this.width + 10,
+                    height: 15
+                };
+                
+                return this.isColliding(attackBox, enemy);
+            }
+            
+            isColliding(box, object) {
+                return (
+                    box.x < object.x + object.width &&
+                    box.x + box.width > object.x &&
+                    box.y < object.y + object.height &&
+                    box.y + box.height > object.y
+                );
+            }
+        }
+        
+        // Bottle Cap projectile
+        class BottleCap {
+            constructor(x, y, direction) {
+                this.x = x;
+                this.y = y;
+                this.width = 10;
+                this.height = 10;
+                this.speed = 8 * direction;
+                this.active = true;
+                this.rotation = 0;
+            }
+            
+            update() {
+                this.x += this.speed;
+                this.rotation += 0.2 * Math.sign(this.speed);
+                
+                // Deactivate if out of bounds
+                if (this.x < 0 || this.x > worldWidth) {
+                    this.active = false;
+                }
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Only draw if in viewport
+                if (screenX + this.width > 0 && 
+                    screenX < canvas.width && 
+                    screenY + this.height > 0 && 
+                    screenY < canvas.height) {
+                    
+                    ctx.save();
+                    ctx.translate(screenX + this.width/2, screenY + this.height/2);
+                    ctx.rotate(this.rotation);
+                    
+                    // Bottle cap
+                    ctx.fillStyle = '#aaa';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.width/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Bottle cap ridges
+                    ctx.strokeStyle = '#777';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    for (let i = 0; i < 8; i++) {
+                        const angle = i * Math.PI / 4;
+                        ctx.moveTo(0, 0);
+                        ctx.lineTo(Math.cos(angle) * this.width/2, Math.sin(angle) * this.width/2);
+                    }
+                    ctx.stroke();
+                    
+                    ctx.restore();
+                }
+            }
+            
+            isColliding(object) {
+                return (
+                    this.x < object.x + object.width &&
+                    this.x + this.width > object.x &&
+                    this.y < object.y + object.height &&
+                    this.y + this.height > object.y
+                );
+            }
+        }
+        
+        // Goblin Enemy (fixed pattern movement)
+        class GoblinEnemy {
+            constructor(x, y, patrolWidth = 150) {
+                this.x = x;
+                this.y = y;
+                this.width = 40;
+                this.height = 50;
+                this.speed = 1.5;
+                this.health = 2;
+                this.hitCooldown = 0;
+                this.damageAmount = 10;
+                
+                // Patrol behavior
+                this.patrolWidth = patrolWidth;
+                this.startX = x;
+                this.direction = 1; // 1 for right, -1 for left
+                this.waitTimer = 0;
+                this.waitDuration = 60; // Frames to wait at patrol endpoints
+                this.isWaiting = false;
+                
+                // Animation properties
+                this.frameX = 0;
+                this.maxFrames = 4;
+                this.frameTimer = 0;
+                this.frameInterval = 10;
+                
+                // Current platform (for edge detection)
+                this.currentPlatform = null;
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Only draw if in viewport
+                if (screenX + this.width > 0 && 
+                    screenX < canvas.width && 
+                    screenY + this.height > 0 && 
+                    screenY < canvas.height) {
+                    
+                    // Hit effect
+                    if (this.hitCooldown > 0) {
+                        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(this.hitCooldown * 0.5);
+                    }
+                    
+                    // Goblin body
+                    ctx.fillStyle = '#5a9c42'; // Green goblin color
+                    
+                    // Basic body
+                    ctx.fillRect(screenX, screenY, this.width, this.height);
+                    
+                    // Head
+                    ctx.fillStyle = '#5a9c42';
+                    ctx.beginPath();
+                    ctx.arc(screenX + this.width/2, screenY - 5, 15, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Eyes
+                    ctx.fillStyle = 'yellow';
+                    const eyeOffset = this.direction > 0 ? 5 : -5;
+                    ctx.beginPath();
+                    ctx.arc(screenX + this.width/2 - 7 + eyeOffset, screenY - 8, 4, 0, Math.PI * 2);
+                    ctx.arc(screenX + this.width/2 + 7 + eyeOffset, screenY - 8, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Mouth (crooked smile)
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    
+                    if (this.direction > 0) {
+                        ctx.moveTo(screenX + this.width/2 - 10, screenY);
+                        ctx.quadraticCurveTo(screenX + this.width/2, screenY + 8, screenX + this.width/2 + 10, screenY - 2);
+                    } else {
+                        ctx.moveTo(screenX + this.width/2 + 10, screenY);
+                        ctx.quadraticCurveTo(screenX + this.width/2, screenY + 8, screenX + this.width/2 - 10, screenY - 2);
+                    }
+                    
+                    ctx.stroke();
+                    
+                    // Arms
+                    ctx.fillStyle = '#5a9c42';
+                    ctx.fillRect(screenX - 5, screenY + 10, 10, 20);
+                    ctx.fillRect(screenX + this.width - 5, screenY + 10, 10, 20);
+                    
+                    // Patrol path visualization (faint line showing patrol route)
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.startX - cameraX, screenY + this.height + 5);
+                    ctx.lineTo(this.startX + this.patrolWidth - cameraX, screenY + this.height + 5);
+                    ctx.stroke();
+                    
+                    // Reset opacity
+                    ctx.globalAlpha = 1;
+                    
+                    // Waiting indicator (if paused at patrol endpoint)
+                    if (this.isWaiting) {
+                        ctx.fillStyle = 'rgba(255, 255, 255<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skateboard Punk Game - Urban Scenery</title>
+    <style>
+        body {
+        // Bottle Cap projectile
+        class BottleCap {
+            constructor(x, y, direction) {
+                this.x = x;
+                this.y = y;
+                this.width = 10;
+                this.height = 10;
+                this.speed = 8 * direction;
+                this.active = true;
+                this.rotation = 0;
+            }
+            
+            update() {
+                this.x += this.speed;
+                this.rotation += 0.2 * Math.sign(this.speed);
+                
+                // Deactivate if out of bounds
+                if (this.x < 0 || this.x > worldWidth) {
+                    this.active = false;
+                }
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Only draw if in viewport
+                if (screenX + this.width > 0 && 
+                    screenX < canvas.width && 
+                    screenY + this.height > 0 && 
+                    screenY < canvas.height) {
+                    
+                    ctx.save();
+                    ctx.translate(screenX + this.width/2, screenY + this.height/2);
+                    ctx.rotate(this.rotation);
+                    
+                    // Bottle cap
+                    ctx.fillStyle = '#aaa';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.width/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Bottle cap ridges
+                    ctx.strokeStyle = '#777';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    for (let i = 0; i < 8; i++) {
+                        const angle = i * Math.PI / 4;
+                        ctx.moveTo(0, 0);
+                        ctx.lineTo(Math.cos(angle) * this.width/2, Math.sin(angle) * this.width/2);
+                    }
+                    ctx.stroke();
+                    
+                    ctx.restore();
+                }
+            }
+            
+            isColliding(object) {
+                return (
+                    this.x < object.x + object.width &&
+                    this.x + this.width > object.x &&
+                    this.y < object.y + object.height &&
+                    this.y + this.height > object.y
+                );
+            }
+        }margin: 0;
+            padding: 0;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #383838;
+            border: 2px solid #666;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <p>Arrow Keys: Move | Up: Jump (Double-Jump Available) | Space: Throw Bottle Cap</p>
+        <p>Bottle Caps: <span id="bottlecaps">10</span> | Health: <span id="health">100</span></p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // Game Setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const bottleCapDisplay = document.getElementById('bottlecaps');
+        
+        // Set canvas size to window dimensions
+        canvas.width = 800;
+        canvas.height = 600;
+        
+        // Game constants
+        const GRAVITY = 0.5;
+        const GROUND_LEVEL = canvas.height - 50;
+        
+        // Camera/viewport
+        const camera = {
+            x: 0,
+            y: 0,
+            width: canvas.width,
+            height: canvas.height,
+            leftLimit: 200,    // Left side camera boundary
+            rightLimit: 500,   // Right side camera boundary
+            topLimit: 200,     // Top side camera boundary
+            bottomLimit: 400,  // Bottom side camera boundary
+            
+            // Update camera position based on player position
+            update(player, worldWidth, worldHeight) {
+                // Horizontal scrolling
+                if (player.x < this.x + this.leftLimit) {
+                    this.x = Math.max(0, player.x - this.leftLimit);
+                } else if (player.x > this.x + this.rightLimit) {
+                    this.x = Math.min(worldWidth - this.width, player.x - this.rightLimit);
+                }
+                
+                // Vertical scrolling
+                if (player.y < this.y + this.topLimit) {
+                    this.y = Math.max(0, player.y - this.topLimit);
+                } else if (player.y > this.y + this.bottomLimit) {
+                    this.y = Math.min(worldHeight - this.height, player.y - this.bottomLimit);
+                }
+            }
+        };
+        
+        // World dimensions
+        let worldWidth = 3000;
+        const worldHeight = 1500;
+        
+        // Level chunk size for procedural generation
+        const chunkSize = 1000;
+        const generationDistance = 2000; // Generate ahead of player
+        
+        // Procedural generation variables
+        let lastGeneratedX = 0;
+        
+        // Procedural generation functions
+        function generateChunk(startX, endX) {
+            const newPlatforms = [];
+            const newBgElements = [];
+            
+            // Generate sidewalks
+            for (let x = startX; x < endX; x += 400) {
+                newPlatforms.push(new Platform(x, GROUND_LEVEL, 400, 50, 'platform', '#888'));
+            }
+            
+            // Generate buildings
+            const buildingSpacing = 300;
+            for (let x = startX - (startX % buildingSpacing); x < endX; x += buildingSpacing) {
+                const buildingHeight = 200 + Math.random() * 300;
+                newBgElements.push(new BackgroundElement(
+                    x, 
+                    GROUND_LEVEL - buildingHeight, 
+                    'building', 
+                    200 + Math.random() * 100, 
+                    buildingHeight
+                ));
+                
+                // Add some graffiti
+                if (Math.random() > 0.6) {
+                    newBgElements.push(new BackgroundElement(
+                        x + Math.random() * 100, 
+                        GROUND_LEVEL - 100 - Math.random() * 50, 
+                        'graffiti', 
+                        50 + Math.random() * 30, 
+                        50 + Math.random() * 30
+                    ));
+                }
+            }
+            
+            // Generate trees
+            const treeSpacing = 200 + Math.random() * 300;
+            for (let x = startX - (startX % treeSpacing); x < endX; x += treeSpacing) {
+                if (Math.random() > 0.4) { // Not all spots get trees
+                    newBgElements.push(new BackgroundElement(
+                        x, 
+                        GROUND_LEVEL - 100, 
+                        'tree', 
+                        80, 
+                        100
+                    ));
+                }
+            }
+            
+            // Generate parked cars
+            const carSpacing = 350 + Math.random() * 500;
+            for (let x = startX - (startX % carSpacing); x < endX; x += carSpacing) {
+                if (Math.random() > 0.3) { // Not all spots get cars
+                    newPlatforms.push(new Platform(
+                        x, 
+                        GROUND_LEVEL - 35, 
+                        80, 
+                        35, 
+                        'car', 
+                        ['#d12a2a', '#2a4bd1', '#2ad12a', '#d1c02a'][Math.floor(Math.random() * 4)]
+                    ));
+                }
+            }
+            
+            // Generate building ledges and rooftops
+            const ledgeSpacing = 300 + Math.random() * 400;
+            for (let x = startX - (startX % ledgeSpacing); x < endX; x += ledgeSpacing) {
+                // Higher chance for platforms in forward direction
+                if (Math.random() > 0.2) {
+                    // Rooftop or ledge height
+                    const height = Math.random() > 0.5 ? 
+                        GROUND_LEVEL - 200 - Math.random() * 150 : // Rooftop
+                        GROUND_LEVEL - 80 - Math.random() * 60;    // Lower ledge
+                    
+                    newPlatforms.push(new Platform(
+                        x, 
+                        height, 
+                        120 + Math.random() * 80, 
+                        20, 
+                        'rooftop', 
+                        '#777'
+                    ));
+                    
+                    // Sometimes add a sign near buildings
+                    if (Math.random() > 0.7) {
+                        newPlatforms.push(new Platform(
+                            x + 150 + Math.random() * 100, 
+                            GROUND_LEVEL - 100, 
+                            80, 
+                            40, 
+                            'sign', 
+                            ['#ffee55', '#55eeff', '#ff77aa'][Math.floor(Math.random() * 3)]
+                        ));
+                    }
+                }
+            }
+            
+            // Generate construction site beams
+            const beamSpacing = 600 + Math.random() * 800;
+            for (let x = startX - (startX % beamSpacing); x < endX; x += beamSpacing) {
+                if (Math.random() > 0.5) { // Not all spots get beams
+                    const beamCount = 1 + Math.floor(Math.random() * 3);
+                    
+                    for (let i = 0; i < beamCount; i++) {
+                        newPlatforms.push(new Platform(
+                            x + i * 150, 
+                            GROUND_LEVEL - 120 - i * 70, 
+                            140, 
+                            15, 
+                            'beam', 
+                            '#b25e00'
+                        ));
+                    }
+                }
+            }
+            
+            // Generate additional enemies
+            generateEnemies(startX, endX, newPlatforms);
+            
+            return { newPlatforms, newBgElements };
+        }
+        
+        // Function to check if we need to generate more chunks
+        function checkAndGenerateLevel() {
+            const rightmostPoint = player.x + generationDistance;
+            
+            if (rightmostPoint > lastGeneratedX) {
+                const newChunkEnd = lastGeneratedX + chunkSize;
+                const { newPlatforms, newBgElements } = generateChunk(lastGeneratedX, newChunkEnd);
+                
+                // Add new elements to level
+                level.platforms.push(...newPlatforms);
+                level.bgElements.push(...newBgElements);
+                
+                // Update world width if needed
+                worldWidth = Math.max(worldWidth, newChunkEnd + 1000);
+                
+                // Update last generated position
+                lastGeneratedX = newChunkEnd;
+                
+                // Clean up old chunks that are far behind
+                cleanupOldChunks();
+                
+                console.log(`Generated new chunk: ${lastGeneratedX - chunkSize} to ${lastGeneratedX}`);
+            }
+        }
+        
+        // Clean up old chunks to prevent memory issues
+        function cleanupOldChunks() {
+            const cleanupX = player.x - 2000; // Remove chunks well behind the player
+            
+            if (cleanupX > chunkSize) { // Only start cleaning after a certain point
+                // Remove old platforms
+                level.platforms = level.platforms.filter(platform => platform.x > cleanupX);
+                
+                // Remove old background elements
+                level.bgElements = level.bgElements.filter(element => element.x > cleanupX - 500); // Keep bg elements a bit longer for visual continuity
+                
+                // Remove old enemies that are off-screen
+                enemies.forEach((enemy, index) => {
+                    if (enemy.x < cleanupX) {
+                        enemies.splice(index, 1);
+                    }
+                });
+                
+                // Remove old bottle caps
+                bottleCaps.forEach((cap, index) => {
+                    if (cap.x < cleanupX) {
+                        cap.active = false;
+                    }
+                });
+            }
+        }
+        
+        // Generate enemies throughout a chunk
+        function generateEnemies(startX, endX, platforms) {
+            // Spawn ghosts on ground
+            for (let x = startX; x < endX; x += 400 + Math.random() * 400) {
+                if (Math.random() > 0.5) { // Not every spot gets an enemy
+                    enemies.push(new GhostEnemy(x, GROUND_LEVEL - 60));
+                }
+            }
+            
+            // Spawn goblins on ground
+            for (let x = startX + 200; x < endX; x += 400 + Math.random() * 400) {
+                if (Math.random() > 0.5) { // Not every spot gets an enemy
+                    // Generate patrol width based on available space
+                    const patrolWidth = 100 + Math.random() * 150;
+                    enemies.push(new GoblinEnemy(x, GROUND_LEVEL - 50, patrolWidth));
+                }
+            }
+            
+            // Spawn enemies on platforms
+            for (let i = 0; i < platforms.length; i++) {
+                const platform = platforms[i];
+                
+                // Only spawn on larger platforms
+                if (platform.width > 100 && Math.random() > 0.6) {
+                    // Decide whether to spawn ghost or goblin (50/50 chance)
+                    if (Math.random() > 0.5) {
+                        enemies.push(new GhostEnemy(
+                            platform.x + platform.width / 2 - 20, 
+                            platform.y - 60
+                        ));
+                    } else {
+                        // For goblins, make patrol width fit platform
+                        const safePlatformWidth = Math.min(platform.width - 50, 150);
+                        const goblinPatrolWidth = Math.max(50, safePlatformWidth);
+                        
+                        enemies.push(new GoblinEnemy(
+                            platform.x + 20,
+                            platform.y - 50,
+                            goblinPatrolWidth
+                        ));
+                    }
+                }
+            }
+        }
+        
+        // Platform class
+        class Platform {
+            constructor(x, y, width, height, type = 'platform', color = '#555') {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.type = type; // platform, car, rooftop, sign, etc.
+                this.color = color;
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Only draw if in viewport
+                if (screenX + this.width > 0 && 
+                    screenX < canvas.width && 
+                    screenY + this.height > 0 && 
+                    screenY < canvas.height) {
+                    
+                    ctx.fillStyle = this.color;
+                    
+                    if (this.type === 'car') {
+                        // Draw car
+                        ctx.fillRect(screenX, screenY, this.width, this.height * 0.6); // Car body
+                        
+                        // Car details
+                        ctx.fillStyle = '#222';
+                        ctx.fillRect(screenX + this.width * 0.1, screenY + this.height * 0.1, this.width * 0.3, this.height * 0.25); // Window
+                        ctx.fillRect(screenX + this.width * 0.6, screenY + this.height * 0.1, this.width * 0.3, this.height * 0.25); // Window
+                        
+                        // Wheels
+                        ctx.fillStyle = '#333';
+                        ctx.beginPath();
+                        ctx.arc(screenX + this.width * 0.2, screenY + this.height * 0.6, this.height * 0.2, 0, Math.PI * 2);
+                        ctx.arc(screenX + this.width * 0.8, screenY + this.height * 0.6, this.height * 0.2, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                    } else if (this.type === 'rooftop') {
+                        // Draw rooftop
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                        
+                        // Roof details (air vents, etc.)
+                        ctx.fillStyle = '#777';
+                        ctx.fillRect(screenX + this.width * 0.2, screenY + this.height * 0.3, this.width * 0.1, this.height * 0.4);
+                        ctx.fillRect(screenX + this.width * 0.6, screenY + this.height * 0.1, this.width * 0.15, this.height * 0.25);
+                        
+                    } else if (this.type === 'sign') {
+                        // Draw sign pole
+                        ctx.fillStyle = '#999';
+                        ctx.fillRect(screenX + this.width / 2 - 5, screenY + this.height * 0.5, 10, this.height * 0.5);
+                        
+                        // Sign board
+                        ctx.fillStyle = this.color;
+                        ctx.fillRect(screenX, screenY, this.width, this.height * 0.5);
+                        
+                        // Sign text (simplified)
+                        ctx.fillStyle = '#fff';
+                        ctx.font = '12px Arial';
+                        ctx.fillText("SKATE SHOP", screenX + 10, screenY + this.height * 0.3);
+                        
+                    } else if (this.type === 'beam') {
+                        // Construction beam
+                        ctx.fillStyle = '#b25e00';
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                        
+                        // Rivets
+                        ctx.fillStyle = '#888';
+                        for (let i = 1; i < this.width / 20; i++) {
+                            ctx.beginPath();
+                            ctx.arc(screenX + i * 20, screenY + 5, 3, 0, Math.PI * 2);
+                            ctx.arc(screenX + i * 20, screenY + this.height - 5, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    } else {
+                        // Regular platform
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                    }
+                }
+            }
+        }
+        
+        // Background element class
+        class BackgroundElement {
+            constructor(x, y, type, width, height) {
+                this.x = x;
+                this.y = y;
+                this.type = type; // building, tree, graffiti, etc.
+                this.width = width;
+                this.height = height;
+                this.parallaxFactor = 0.6; // Slower movement for background
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                // Apply parallax effect
+                const screenX = this.x - cameraX * this.parallaxFactor;
+                const screenY = this.y - cameraY * this.parallaxFactor;
+                
+                // Only draw if in viewport with some buffer
+                if (screenX + this.width > -200 && 
+                    screenX < canvas.width + 200 && 
+                    screenY + this.height > -200 && 
+                    screenY < canvas.height + 200) {
+                    
+                    if (this.type === 'building') {
+                        // Draw building
+                        ctx.fillStyle = '#444';
+                        ctx.fillRect(screenX, screenY, this.width, this.height);
+                        
+                        // Windows
+                        ctx.fillStyle = '#666';
+                        const windowWidth = 15;
+                        const windowHeight = 20;
+                        const windowSpacingX = 30;
+                        const windowSpacingY = 40;
+                        
+                        for (let x = 20; x < this.width - 20; x += windowSpacingX) {
+                            for (let y = 20; y < this.height - 40; y += windowSpacingY) {
+                                ctx.fillRect(screenX + x, screenY + y, windowWidth, windowHeight);
+                            }
+                        }
+                        
+                    } else if (this.type === 'tree') {
+                        // Draw tree trunk
+                        ctx.fillStyle = '#8B4513';
+                        ctx.fillRect(screenX + this.width/2 - 5, screenY + this.height/2, 10, this.height/2);
+                        
+                        // Tree foliage
+                        ctx.fillStyle = '#006400';
+                        ctx.beginPath();
+                        ctx.arc(screenX + this.width/2, screenY + this.height/2, this.width/3, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                    } else if (this.type === 'graffiti') {
+                        // Graffiti is just colorful shapes for visual effect
+                        ctx.fillStyle = this.getRandomColor();
+                        ctx.beginPath();
+                        ctx.moveTo(screenX, screenY);
+                        ctx.lineTo(screenX + this.width, screenY + this.height/3);
+                        ctx.lineTo(screenX + this.width/2, screenY + this.height);
+                        ctx.closePath();
+                        ctx.fill();
+                        
+                        ctx.fillStyle = this.getRandomColor();
+                        ctx.beginPath();
+                        ctx.arc(screenX + this.width/2, screenY + this.height/2, this.width/4, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            getRandomColor() {
+                const colors = ['#FF5555', '#55FF55', '#5555FF', '#FFFF55', '#FF55FF', '#55FFFF'];
+                return colors[Math.floor(this.x * this.y) % colors.length]; // Deterministic based on position
+            }
+        }
+        
+        // Player class
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 60;
+                this.speedX = 0;
+                this.speedY = 0;
+                this.maxSpeedX = 6;
+                this.jumpForce = -15;
+                this.isJumping = false;
+                this.canDoubleJump = false;
+                this.hasDoubleJumped = false;
+                this.health = 100;
+                this.invulnerable = 0;
+                this.bottleCaps = 10;
+                this.direction = 1; // 1 for right, -1 for left
+                this.isAttacking = false;
+                this.attackCooldown = 0;
+                this.jumpAttackActive = false;
+                this.isFalling = false;
+                this.jumpPeak = false;
+                this.fallDistance = 0;
+                this.lastY = y;
+                this.currentPlatform = null;
+            }
+            
+            update(platforms) {
+                // Store last Y position to calculate fall distance
+                this.lastY = this.y;
+                
+                // Apply gravity
+                this.speedY += GRAVITY;
+                
+                // Apply speeds
+                this.x += this.speedX;
+                this.y += this.speedY;
+                
+                // Check world boundaries
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.width > worldWidth) this.x = worldWidth - this.width;
+                
+                // Platform collision
+                let onPlatform = false;
+                this.currentPlatform = null;
+                
+                for (const platform of platforms) {
+                    // Check if player is on a platform
+                    if (this.speedY >= 0 && // Only when moving down/falling
+                        this.lastY + this.height <= platform.y && // Was above platform in last frame
+                        this.x + this.width > platform.x && 
+                        this.x < platform.x + platform.width && 
+                        this.y + this.height >= platform.y && 
+                        this.y + this.height <= platform.y + platform.height/2) {
+                        
+                        this.y = platform.y - this.height;
+                        this.speedY = 0;
+                        onPlatform = true;
+                        this.isJumping = false;
+                        this.jumpAttackActive = false;
+                        this.isFalling = false;
+                        this.jumpPeak = false;
+                        this.canDoubleJump = false;
+                        this.hasDoubleJumped = false;
+                        this.currentPlatform = platform;
+                        break;
+                    }
+                    
+                    // Very simple side collision (can be improved)
+                    if (this.x + this.width > platform.x && 
+                        this.x < platform.x + platform.width && 
+                        this.y + this.height > platform.y && 
+                        this.y < platform.y + platform.height) {
+                        
+                        // Only handle side collision if not landing on top
+                        if (!onPlatform) {
+                            // Left side collision
+                            if (this.speedX > 0 && this.x + this.width > platform.x && this.lastY + this.height > platform.y) {
+                                this.x = platform.x - this.width;
+                                this.speedX = 0;
+                            }
+                            // Right side collision
+                            else if (this.speedX < 0 && this.x < platform.x + platform.width && this.lastY + this.height > platform.y) {
+                                this.x = platform.x + platform.width;
+                                this.speedX = 0;
+                            }
+                        }
+                    }
+                }
+                
+                // Ground collision (if not on platform)
+                if (!onPlatform) {
+                    if (this.y + this.height > GROUND_LEVEL) {
+                        this.y = GROUND_LEVEL - this.height;
+                        this.speedY = 0;
+                        this.isJumping = false;
+                        this.jumpAttackActive = false;
+                        this.isFalling = false;
+                        this.jumpPeak = false;
+                        this.canDoubleJump = false;
+                        this.hasDoubleJumped = false;
+                    }
+                }
+                
+                // Jumping and falling states
+                if (this.isJumping) {
+                    if (this.speedY > 0) {
+                        this.isFalling = true;
+                        
+                        // Check for jump peak (when starting to fall)
+                        if (!this.jumpPeak) {
+                            this.jumpPeak = true;
+                        }
+                    }
+                }
+                
+                // Calculate fall distance (only when falling)
+                if (this.isFalling) {
+                    this.fallDistance = this.y - this.lastY;
+                    
+                    // Jump attack is active during the first half of the fall
+                    this.jumpAttackActive = this.fallDistance > 1.5 && this.fallDistance < 8;
+                }
+                
+                // Update attack cooldown
+                if (this.attackCooldown > 0) {
+                    this.attackCooldown--;
+                    if (this.attackCooldown === 0) {
+                        this.isAttacking = false;
+                    }
+                }
+                
+                // Update invulnerability frames
+                if (this.invulnerable > 0) {
+                    this.invulnerable--;
+                }
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Invulnerability blinking effect
+                if (this.invulnerable > 0 && Math.floor(this.invulnerable / 5) % 2 === 0) {
+                    ctx.globalAlpha = 0.5;
+                }
+                
+                // Debug visualization for jump attack
+                if (this.jumpAttackActive) {
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                    ctx.fillRect(screenX - 5, screenY + this.height - 10, this.width + 10, 15);
+                }
+                
+                // Body - side view
+                ctx.fillStyle = '#000'; // Black jacket
+                ctx.fillRect(screenX + 5, screenY, 20, 30);
+                
+                ctx.fillStyle = '#fff'; // White t-shirt
+                ctx.fillRect(screenX + 3, screenY + 5, 5, 20);
+                
+                ctx.fillStyle = '#000066'; // Blue jeans
+                ctx.fillRect(screenX + 5, screenY + 30, 20, 20);
+                
+                // Head
+                ctx.fillStyle = '#FFD3B4'; // Skin tone
+                ctx.beginPath();
+                ctx.arc(screenX + (this.direction > 0 ? 20 : 10), screenY - 5, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Mohawk
+                ctx.fillStyle = '#ff0066'; // Pink mohawk
+                ctx.beginPath();
+                if (this.direction > 0) {
+                    // Right-facing mohawk
+                    ctx.moveTo(screenX + 20, screenY - 10);
+                    ctx.lineTo(screenX + 25, screenY - 20);
+                    ctx.lineTo(screenX + 20, screenY - 15);
+                    ctx.lineTo(screenX + 28, screenY - 22);
+                } else {
+                    // Left-facing mohawk
+                    ctx.moveTo(screenX + 10, screenY - 10);
+                    ctx.lineTo(screenX + 5, screenY - 20);
+                    ctx.lineTo(screenX + 10, screenY - 15);
+                    ctx.lineTo(screenX + 2, screenY - 22);
+                }
+                ctx.fill();
+                
+                // Skateboard
+                ctx.fillStyle = '#333'; // Board
+                ctx.fillRect(screenX - 10, screenY + this.height - 10, 50, 5);
+                
+                // Wheels
+                ctx.fillStyle = '#f00'; // Red wheels
+                ctx.beginPath();
+                ctx.arc(screenX, screenY + this.height - 5, 4, 0, Math.PI * 2);
+                ctx.arc(screenX + 30, screenY + this.height - 5, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Bottle cap pouch
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(screenX + (this.direction > 0 ? 25 : -5), screenY + 20, 8, 12);
+                
+                // Attacking animation (throw)
+                if (this.isAttacking) {
+                    ctx.fillStyle = '#000';
+                    // Arm extended for throwing
+                    ctx.beginPath();
+                    if (this.direction > 0) {
+                        ctx.moveTo(screenX + 20, screenY + 15);
+                        ctx.lineTo(screenX + 35, screenY + 20);
+                    } else {
+                        ctx.moveTo(screenX + 10, screenY + 15);
+                        ctx.lineTo(screenX - 5, screenY + 20);
+                    }
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+                
+                // Health bar
+                ctx.fillStyle = 'black';
+                ctx.fillRect(screenX - 5, screenY - 30, 40, 5);
+                ctx.fillStyle = this.health > 50 ? 'green' : this.health > 25 ? 'orange' : 'red';
+                ctx.fillRect(screenX - 5, screenY - 30, 40 * (this.health/100), 5);
+                
+                // Reset opacity
+                ctx.globalAlpha = 1;
+            }
+            
+            jump() {
+                if (!this.isJumping) {
+                    // First jump
+                    this.isJumping = true;
+                    this.speedY = this.jumpForce;
+                    this.isFalling = false;
+                    this.jumpPeak = false;
+                    this.fallDistance = 0;
+                    this.canDoubleJump = true;
+                    this.hasDoubleJumped = false;
+                } else if (this.canDoubleJump && !this.hasDoubleJumped) {
+                    // Double jump
+                    this.speedY = -10; // Same force as bouncing off enemies
+                    this.canDoubleJump = false;
+                    this.hasDoubleJumped = true;
+                }
+            }
+            
+            throwBottleCap() {
+                if (this.bottleCaps > 0 && !this.isAttacking) {
+                    this.bottleCaps--;
+                    this.isAttacking = true;
+                    this.attackCooldown = 20;
+                    bottleCapDisplay.textContent = this.bottleCaps;
+                    return new BottleCap(
+                        this.x + (this.direction > 0 ? this.width + 5 : -15), 
+                        this.y + 15, 
+                        this.direction
+                    );
+                }
+                return null;
+            }
+            
+            takeDamage(amount) {
+                if (this.invulnerable <= 0) {
+                    this.health -= amount;
+                    this.invulnerable = 60; // 1 second of invulnerability
+                    
+                    // Update health display
+                    document.getElementById('health').textContent = this.health;
+                    
+                    if (this.health <= 0) {
+                        // Game over logic here
+                        alert("Game Over! Refresh to restart.");
+                        window.location.reload();
+                    }
+                }
+            }
+            
+            // Check if player's skateboard is hitting an enemy during jump attack
+            checkJumpAttack(enemy) {
+                if (!this.jumpAttackActive) return false;
+                
+                // The "attack box" is at the bottom of the player (skateboard)
+                const attackBox = {
+                    x: this.x - 5,
+                    y: this.y + this.height - 10,
+                    width: this.width + 10,
+                    height: 15
+                };
+                
+                return this.isColliding(attackBox, enemy);
+            }
+            
+            isColliding(box, object) {
+                return (
+                    box.x < object.x + object.width &&
+                    box.x + box.width > object.x &&
+                    box.y < object.y + object.height &&
+                    box.y + box.height > object.y
+                );
+            }
+        }
+        
+        // Goblin Enemy (fixed pattern movement)
+        class GoblinEnemy {
+            constructor(x, y, patrolWidth = 150) {
+                this.x = x;
+                this.y = y;
+                this.width = 40;
+                this.height = 50;
+                this.speed = 1.5;
+                this.health = 2;
+                this.hitCooldown = 0;
+                this.damageAmount = 10;
+                
+                // Patrol behavior
+                this.patrolWidth = patrolWidth;
+                this.startX = x;
+                this.direction = 1; // 1 for right, -1 for left
+                this.waitTimer = 0;
+                this.waitDuration = 60; // Frames to wait at patrol endpoints
+                this.isWaiting = false;
+                
+                // Animation properties
+                this.frameX = 0;
+                this.maxFrames = 4;
+                this.frameTimer = 0;
+                this.frameInterval = 10;
+                
+                // Current platform (for edge detection)
+                this.currentPlatform = null;
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Only draw if in viewport
+                if (screenX + this.width > 0 && 
+                    screenX < canvas.width && 
+                    screenY + this.height > 0 && 
+                    screenY < canvas.height) {
+                    
+                    // Hit effect
+                    if (this.hitCooldown > 0) {
+                        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(this.hitCooldown * 0.5);
+                    }
+                    
+                    // Goblin body
+                    ctx.fillStyle = '#5a9c42'; // Green goblin color
+                    
+                    // Basic body
+                    ctx.fillRect(screenX, screenY, this.width, this.height);
+                    
+                    // Head
+                    ctx.fillStyle = '#5a9c42';
+                    ctx.beginPath();
+                    ctx.arc(screenX + this.width/2, screenY - 5, 15, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Eyes
+                    ctx.fillStyle = 'yellow';
+                    const eyeOffset = this.direction > 0 ? 5 : -5;
+                    ctx.beginPath();
+                    ctx.arc(screenX + this.width/2 - 7 + eyeOffset, screenY - 8, 4, 0, Math.PI * 2);
+                    ctx.arc(screenX + this.width/2 + 7 + eyeOffset, screenY - 8, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Mouth (crooked smile)
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    
+                    if (this.direction > 0) {
+                        ctx.moveTo(screenX + this.width/2 - 10, screenY);
+                        ctx.quadraticCurveTo(screenX + this.width/2, screenY + 8, screenX + this.width/2 + 10, screenY - 2);
+                    } else {
+                        ctx.moveTo(screenX + this.width/2 + 10, screenY);
+                        ctx.quadraticCurveTo(screenX + this.width/2, screenY + 8, screenX + this.width/2 - 10, screenY - 2);
+                    }
+                    
+                    ctx.stroke();
+                    
+                    // Arms
+                    ctx.fillStyle = '#5a9c42';
+                    ctx.fillRect(screenX - 5, screenY + 10, 10, 20);
+                    ctx.fillRect(screenX + this.width - 5, screenY + 10, 10, 20);
+                    
+                    // Patrol path visualization (faint line showing patrol route)
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.startX - cameraX, screenY + this.height + 5);
+                    ctx.lineTo(this.startX + this.patrolWidth - cameraX, screenY + this.height + 5);
+                    ctx.stroke();
+                    
+                    // Reset opacity
+                    ctx.globalAlpha = 1;
+                    
+                    // Waiting indicator (if paused at patrol endpoint)
+                    if (this.isWaiting) {
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                        ctx.beginPath();
+                        ctx.arc(screenX + this.width/2, screenY - 25, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            update(platforms) {
+                // Decrease hit cooldown
+                if (this.hitCooldown > 0) this.hitCooldown--;
+                
+                // Animation timer
+                this.frameTimer++;
+                if (this.frameTimer > this.frameInterval) {
+                    this.frameTimer = 0;
+                    this.frameX = (this.frameX + 1) % this.maxFrames;
+                }
+                
+                // Waiting at patrol endpoints
+                if (this.isWaiting) {
+                    this.waitTimer--;
+                    if (this.waitTimer <= 0) {
+                        this.isWaiting = false;
+                        this.direction *= -1; // Change direction after waiting
+                    }
+                    return; // Don't move while waiting
+                }
+                
+                // Move along patrol path
+                this.x += this.speed * this.direction;
+                
+                // Check if reached patrol endpoints
+                if (this.direction > 0 && this.x >= this.startX + this.patrolWidth) {
+                    this.x = this.startX + this.patrolWidth; // Ensure precise positioning
+                    this.isWaiting = true;
+                    this.waitTimer = this.waitDuration;
+                } else if (this.direction < 0 && this.x <= this.startX) {
+                    this.x = this.startX; // Ensure precise positioning
+                    this.isWaiting = true;
+                    this.waitTimer = this.waitDuration;
+                }
+                
+                // Find current platform (for edge detection)
+                this.currentPlatform = null;
+                let onPlatform = false;
+                
+                for (const platform of platforms) {
+                    // Check if goblin is on a platform
+                    if (this.x + this.width > platform.x && 
+                        this.x < platform.x + platform.width && 
+                        this.y + this.height >= platform.y && 
+                        this.y + this.height <= platform.y + 10) {
+                        
+                        this.currentPlatform = platform;
+                        onPlatform = true;
+                        break;
+                    }
+                }
+                
+                // Edge detection (don't fall off platforms)
+                if (onPlatform && this.currentPlatform) {
+                    // Check if about to walk off edge
+                    if ((this.direction > 0 && this.x + this.width + 5 > this.currentPlatform.x + this.currentPlatform.width) ||
+                        (this.direction < 0 && this.x - 5 < this.currentPlatform.x)) {
+                        
+                        // Adjust patrol endpoints to platform boundaries
+                        if (this.direction > 0) {
+                            this.startX = this.currentPlatform.x;
+                            this.patrolWidth = this.currentPlatform.width - this.width;
+                            this.x = this.startX + this.patrolWidth;
+                        } else {
+                            this.startX = this.currentPlatform.x;
+                            this.patrolWidth = this.currentPlatform.width - this.width;
+                            this.x = this.startX;
+                        }
+                        
+                        this.isWaiting = true;
+                        this.waitTimer = this.waitDuration;
+                        this.direction *= -1;
+                    }
+                }
+                
+                // Ground collision
+                if (!onPlatform) {
+                    if (this.y + this.height > GROUND_LEVEL) {
+                        this.y = GROUND_LEVEL - this.height;
+                    }
+                }
+            }
+            
+            isColliding(object) {
+                return (
+                    this.x < object.x + object.width &&
+                    this.x + this.width > object.x &&
+                    this.y < object.y + object.height &&
+                    this.y + this.height > object.y
+                );
+            }
+            
+            hit() {
+                if (this.hitCooldown <= 0) {
+                    this.health--;
+                    this.hitCooldown = 30;
+                    return true;
+                }
+                return false;
+            }
+            
+            isAlive() {
+                return this.health > 0;
+            }
+        }
+        
+        // Ghost Enemy
+        class GhostEnemy {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 40;
+                this.height = 60;
+                this.speed = 1.8; // 20% faster
+                this.detectionRadius = 200;
+                this.chaseSpeed = 2.4; // 20% faster
+                this.patrolSpeed = 1.2; // 20% faster
+                this.currentSpeed = this.patrolSpeed;
+                this.isChasing = false;
+                this.health = 2;
+                this.hitCooldown = 0;
+                this.damageAmount = 10; // How much damage ghost does to player
+                
+                // Patrol behavior
+                this.patrolDistance = 150;
+                this.startX = x;
+                this.direction = 1; // 1 for right, -1 for left
+                
+                // Imperfect pursuit variables
+                this.lastDirectionChange = 0;
+                this.directionChangeInterval = 60;
+                this.pursuitImperfection = 0;
+            }
+            
+            draw(ctx, cameraX, cameraY) {
+                const screenX = this.x - cameraX;
+                const screenY = this.y - cameraY;
+                
+                // Only draw if in viewport
+                if (screenX + this.width > 0 && 
+                    screenX < canvas.width && 
+                    screenY + this.height > 0 && 
+                    screenY < canvas.height) {
+                    
+                    // Hit effect
+                    if (this.hitCooldown > 0) {
+                        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(this.hitCooldown * 0.5);
+                    }
+                    
+                    // Basic ghost shape
+                    ctx.fillStyle = '#555555';
+                    
+                    // Ghost body
+                    ctx.beginPath();
+                    ctx.moveTo(screenX + this.width/2, screenY);
+                    
+                    // Top-left curve
+                    ctx.bezierCurveTo(
+                        screenX, screenY, 
+                        screenX, screenY + this.height * 0.7, 
+                        screenX, screenY + this.height * 0.7
+                    );
+                    
+                    // Bottom wavy edge
+                    ctx.lineTo(screenX, screenY + this.height);
+                    ctx.lineTo(screenX + this.width * 0.2, screenY + this.height * 0.9);
+                    ctx.lineTo(screenX + this.width * 0.4, screenY + this.height);
+                    ctx.lineTo(screenX + this.width * 0.6, screenY + this.height * 0.9);
+                    ctx.lineTo(screenX + this.width * 0.8, screenY + this.height);
+                    ctx.lineTo(screenX + this.width, screenY + this.height * 0.9);
+                    
+                    // Top-right curve
+                    ctx.lineTo(screenX + this.width, screenY + this.height * 0.7);
+                    ctx.bezierCurveTo(
+                        screenX + this.width, screenY + this.height * 0.7, 
+                        screenX + this.width, screenY, 
+                        screenX + this.width/2, screenY
+                    );
+                    
+                    ctx.fill();
+                    ctx.strokeStyle = '#333333';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                    
+                    // Eyes
+                    ctx.fillStyle = 'red';
+                    const eyeOffset = this.direction > 0 ? 5 : -5;
+                    ctx.beginPath();
+                    ctx.arc(screenX + this.width * 0.3 + eyeOffset, screenY + this.height * 0.3, this.width * 0.1, 0, Math.PI * 2);
+                    ctx.arc(screenX + this.width * 0.7 + eyeOffset, screenY + this.height * 0.3, this.width * 0.1, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Mouth
+                    ctx.strokeStyle = '#333333';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(screenX + this.width * 0.3, screenY + this.height * 0.6);
+                    ctx.bezierCurveTo(
+                        screenX + this.width * 0.4, screenY + this.height * 0.7,
+                        screenX + this.width * 0.6, screenY + this.height * 0.7,
+                        screenX + this.width * 0.7, screenY + this.height * 0.6
+                    );
+                    ctx.stroke();
+                    
+                    // Reset opacity
+                    ctx.globalAlpha = 1;
+                }
+            }
+            
+            update(player, platforms) {
+                // Decrease hit cooldown
+                if (this.hitCooldown > 0) this.hitCooldown--;
+                
+                // Calculate distance to player
+                const dx = player.x - this.x;
+                const dy = player.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Determine if we should chase the player
+                if (distance < this.detectionRadius) {
+                    this.isChasing = true;
+                    this.currentSpeed = this.chaseSpeed;
+                    
+                    // Add imperfection to pursuit
+                    if (this.lastDirectionChange <= 0) {
+                        this.pursuitImperfection = (Math.random() - 0.5) * 30;
+                        this.lastDirectionChange = this.directionChangeInterval;
+                    } else {
+                        this.lastDirectionChange--;
+                    }
+                    
+                    // Calculate movement direction toward player (with imperfection)
+                    const targetX = player.x + this.pursuitImperfection;
+                    const targetY = player.y + this.pursuitImperfection;
+                    
+                    const targetDx = targetX - this.x;
+                    const targetDy = targetY - this.y;
+                    const targetDistance = Math.sqrt(targetDx * targetDx + targetDy * targetDy);
+                    
+                    // Normalize and apply speed
+                    if (targetDistance > 0) {
+                        const velocityX = (targetDx / targetDistance) * this.currentSpeed;
+                        const velocityY = (targetDy / targetDistance) * this.currentSpeed;
+                        
+                        // Store potential new position
+                        let newX = this.x + velocityX;
+                        let newY = this.y + velocityY;
+                        
+                        // Platform collision - basic implementation
+                        let onGround = false;
+                        
+                        for (const platform of platforms) {
+                            // Standing on a platform
+                            if (newY + this.height > platform.y && 
+                                newY + this.height < platform.y + 10 && 
+                                newX + this.width > platform.x && 
+                                newX < platform.x + platform.width) {
+                                newY = platform.y - this.height;
+                                onGround = true;
+                            }
+                            
+                            // Side collision (very simple)
+                            if (newY + this.height > platform.y && 
+                                newY < platform.y + platform.height) {
+                                // Left side collision
+                                if (velocityX > 0 && newX + this.width > platform.x && newX + this.width < platform.x + 10) {
+                                    newX = platform.x - this.width;
+                                }
+                                // Right side collision
+                                else if (velocityX < 0 && newX < platform.x + platform.width && newX > platform.x + platform.width - 10) {
+                                    newX = platform.x + platform.width;
+                                }
+                            }
+                        }
+                        
+                        // Update position
+                        this.x = newX;
+                        this.y = newY;
+                        
+                        // Ground collision if not on platform
+                        if (!onGround && this.y + this.height > GROUND_LEVEL) {
+                            this.y = GROUND_LEVEL - this.height;
+                        }
+                    }
+                    
+                    // Update direction for visual facing
+                    if (dx > 0) this.direction = 1;
+                    else this.direction = -1;
+                } 
+                // Patrol behavior when not chasing
+                else {
+                    this.isChasing = false;
+                    this.currentSpeed = this.patrolSpeed;
+                    
+                    // Simple left-right patrol
+                    this.x += this.direction * this.currentSpeed;
+                    
+                    // Reverse direction at patrol boundaries
+                    if (this.x > this.startX + this.patrolDistance) {
+                        this.direction = -1;
+                    } else if (this.x < this.startX - this.patrolDistance) {
+                        this.direction = 1;
+                    }
+                    
+                    // Reverse on platform edges (to prevent falling)
+                    let onEdge = true;
+                    
+                    // Find if standing on a platform
+                    for (const platform of platforms) {
+                        if (this.x + this.width * (this.direction > 0 ? 1 : 0) > platform.x && 
+                            this.x + this.width * (this.direction > 0 ? 1 : 0) < platform.x + platform.width &&
+                            this.y + this.height > platform.y - 5 && 
+                            this.y + this.height < platform.y + 10) {
+                            onEdge = false;
+                            break;
+                        }
+                    }
+                    
+                    // If at edge, reverse direction
+                    if (onEdge) {
+                        this.direction *= -1;
+                    }
+                    
+                    // Ground collision
+                    if (this.y + this.height > GROUND_LEVEL) {
+                        this.y = GROUND_LEVEL - this.height;
+                    }
+                    
+                    // Randomly change direction occasionally
+                    if (Math.random() < 0.005) {
+                        this.direction *= -1;
+                    }
+                }
+            }
+            
+            isColliding(object) {
+                return (
+                    this.x < object.x + object.width &&
+                    this.x + this.width > object.x &&
+                    this.y < object.y + object.height &&
+                    this.y + this.height > object.y
+                );
+            }
+            
+            hit() {
+                if (this.hitCooldown <= 0) {
+                    this.health--;
+                    this.hitCooldown = 30;
+                    return true;
+                }
+                return false;
+            }
+            
+            isAlive() {
+                return this.health > 0;
+            }
+        }
+        
+        // Create urban level layout
+        function createLevel() {
+            const platforms = [];
+            const bgElements = [];
+            
+            // Ground platforms (sidewalks)
+            for (let x = 0; x < worldWidth; x += 400) {
+                platforms.push(new Platform(x, GROUND_LEVEL, 400, 50, 'platform', '#888'));
+            }
+            
+            // Buildings in background
+            for (let x = -100; x < worldWidth + 200; x += 300) {
+                const buildingHeight = 200 + Math.random() * 300;
+                bgElements.push(new BackgroundElement(
+                    x, 
+                    GROUND_LEVEL - buildingHeight, 
+                    'building', 
+                    200 + Math.random() * 100, 
+                    buildingHeight
+                ));
+                
+                // Add some graffiti on buildings
+                if (Math.random() > 0.6) {
+                    bgElements.push(new BackgroundElement(
+                        x + Math.random() * 100, 
+                        GROUND_LEVEL - 100 - Math.random() * 50, 
+                        'graffiti', 
+                        50 + Math.random() * 30, 
+                        50 + Math.random() * 30
+                    ));
+                }
+            }
+            
+            // Trees scattered around
+            for (let x = 100; x < worldWidth; x += 200 + Math.random() * 300) {
+                bgElements.push(new BackgroundElement(
+                    x, 
+                    GROUND_LEVEL - 100, 
+                    'tree', 
+                    80, 
+                    100
+                ));
+            }
+            
+            // Parked cars (platforms)
+            for (let x = 150; x < worldWidth; x += 350 + Math.random() * 500) {
+                platforms.push(new Platform(
+                    x, 
+                    GROUND_LEVEL - 35, 
+                    80, 
+                    35, 
+                    'car', 
+                    ['#d12a2a', '#2a4bd1', '#2ad12a', '#d1c02a'][Math.floor(Math.random() * 4)]
+                ));
+            }
+            
+            // Building ledges and rooftops
+            for (let x = 250; x < worldWidth; x += 300 + Math.random() * 400) {
+                // Rooftop or ledge height
+                const height = Math.random() > 0.5 ? 
+                    GROUND_LEVEL - 200 - Math.random() * 150 : // Rooftop
+                    GROUND_LEVEL - 80 - Math.random() * 60;    // Lower ledge
+                
+                platforms.push(new Platform(
+                    x, 
+                    height, 
+                    120 + Math.random() * 80, 
+                    20, 
+                    'rooftop', 
+                    '#777'
+                ));
+                
+                // Sometimes add a sign near buildings
+                if (Math.random() > 0.7) {
+                    platforms.push(new Platform(
+                        x + 150 + Math.random() * 100, 
+                        GROUND_LEVEL - 100, 
+                        80, 
+                        40, 
+                        'sign', 
+                        ['#ffee55', '#55eeff', '#ff77aa'][Math.floor(Math.random() * 3)]
+                    ));
+                }
+            }
+            
+            // Construction site beams
+            for (let x = 400; x < worldWidth; x += 600 + Math.random() * 800) {
+                const beamCount = 1 + Math.floor(Math.random() * 3);
+                
+                for (let i = 0; i < beamCount; i++) {
+                    platforms.push(new Platform(
+                        x + i * 150, 
+                        GROUND_LEVEL - 120 - i * 70, 
+                        140, 
+                        15, 
+                        'beam', 
+                        '#b25e00'
+                    ));
+                }
+            }
+            
+            return { platforms, bgElements };
+        }
+        
+        // Game variables
+        const player = new Player(100, GROUND_LEVEL - 200);
+        const bottleCaps = [];
+        const enemies = [];
+        
+        // Health display initialization
+        document.getElementById('health').textContent = player.health;
+        
+        // Initialize level structure
+        const level = {
+            platforms: [],
+            bgElements: []
+        };
+        
+        // Initial level generation
+        const initialChunks = 3;
+        for (let i = 0; i < initialChunks; i++) {
+            const { newPlatforms, newBgElements } = generateChunk(i * chunkSize, (i + 1) * chunkSize);
+            level.platforms.push(...newPlatforms);
+            level.bgElements.push(...newBgElements);
+            lastGeneratedX = (i + 1) * chunkSize;
+        }
+        
+        // Spawn enemies throughout the level
+        function spawnEnemies() {
+            // Handled by generateEnemies within the chunk generation
+        }
+        
+        // We don't call spawnEnemies() directly anymore - enemies are generated with the chunks
+        
+        // Input handling
+        const keys = {};
+        
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            
+            // Jump or double jump on key press, not hold
+            if (e.key === 'ArrowUp') {
+                player.jump();
+            }
+            
+            // Throw bottle cap
+            if (e.key === ' ') {
+                const bottleCap = player.throwBottleCap();
+                if (bottleCap) bottleCaps.push(bottleCap);
+                
+                // Prevent spacebar from scrolling
+                e.preventDefault();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+        
+        // Game loop
+        function gameLoop() {
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Player movement
+            player.speedX = 0;
+            
+            if (keys['ArrowLeft']) {
+                player.speedX = -player.maxSpeedX;
+                player.direction = -1;
+            }
+            if (keys['ArrowRight']) {
+                player.speedX = player.maxSpeedX;
+                player.direction = 1;
+            }
+            
+            // Update player
+            player.update(level.platforms);
+            
+            // Update camera
+            camera.update(player, worldWidth, worldHeight);
+            
+            // Check if we need to generate more level
+            checkAndGenerateLevel();
+            
+            // Draw background (sky gradient)
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#87CEEB'); // Sky blue
+            gradient.addColorStop(1, '#E0F7FF'); // Light blue at horizon
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background elements
+            level.bgElements.forEach(element => element.draw(ctx, camera.x, camera.y));
+            
+            // Draw ground
+            ctx.fillStyle = '#8B4513'; // Brown dirt
+            ctx.fillRect(0, GROUND_LEVEL - camera.y, canvas.width, canvas.height);
+            
+            // Draw platforms
+            level.platforms.forEach(platform => platform.draw(ctx, camera.x, camera.y));
+            
+            // Update bottle caps
+            bottleCaps.forEach((cap, index) => {
+                cap.update();
+                
+                // Remove inactive caps
+                if (!cap.active) {
+                    bottleCaps.splice(index, 1);
+                }
+            });
+            
+            // Update enemies
+            enemies.forEach((enemy, index) => {
+                // Different update methods for different enemy types
+                if (enemy instanceof GhostEnemy) {
+                    enemy.update(player, level.platforms);
+                } else if (enemy instanceof GoblinEnemy) {
+                    enemy.update(level.platforms);
+                }
+                
+                // Check for jump attack collision
+                if (player.checkJumpAttack(enemy)) {
+                    enemy.hit();
+                    player.speedY = -10; // Bounce off enemy
+                }
+                
+                // Check for player collision with enemy
+                if (enemy.isColliding(player) && enemy.isAlive()) {
+                    player.takeDamage(enemy.damageAmount);
+                }
+                
+                // Check collision with bottle caps
+                bottleCaps.forEach((cap, capIndex) => {
+                    if (cap.isColliding(enemy) && cap.active) {
+                        if (enemy.hit()) {
+                            cap.active = false;
+                        }
+                    }
+                });
+                
+                // Remove dead enemies
+                if (!enemy.isAlive()) {
+                    enemies.splice(index, 1);
+                }
+            });
+            
+            // Respawn enemies if almost all are defeated
+            if (enemies.length < 3) {
+                // Generate more enemies on existing platforms
+                for (let i = 0; i < level.platforms.length; i++) {
+                    const platform = level.platforms[i];
+                    
+                    // Only choose platforms that are ahead of player
+                    if (platform.x > player.x && platform.width > 100 && Math.random() > 0.7) {
+                        // 50/50 chance between ghost and goblin
+                        if (Math.random() > 0.5) {
+                            enemies.push(new GhostEnemy(
+                                platform.x + platform.width / 2 - 20, 
+                                platform.y - 60
+                            ));
+                        } else {
+                            const safePlatformWidth = Math.min(platform.width - 50, 150);
+                            const goblinPatrolWidth = Math.max(50, safePlatformWidth);
+                            
+                            enemies.push(new GoblinEnemy(
+                                platform.x + 20,
+                                platform.y - 50,
+                                goblinPatrolWidth
+                            ));
+                        }
+                    }
+                }
+            }
+            
+            // Draw bottle caps
+            bottleCaps.forEach(cap => cap.draw(ctx, camera.x, camera.y));
+            
+            // Draw enemies
+            enemies.forEach(enemy => enemy.draw(ctx, camera.x, camera.y));
+            
+            // Draw player
+            player.draw(ctx, camera.x, camera.y);
+            
+            // Debug info
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.fillText(`Player: (${Math.round(player.x)}, ${Math.round(player.y)})`, 10, 20);
+            ctx.fillText(`Camera: (${Math.round(camera.x)}, ${Math.round(camera.y)})`, 10, 40);
+            ctx.fillText(`Chunks Generated: ${Math.floor(lastGeneratedX / chunkSize)}`, 10, 60);
+            ctx.fillText(`World Width: ${worldWidth}`, 10, 80);
+            ctx.fillText(`Platforms: ${level.platforms.length}`, 10, 100);
+            ctx.fillText(`Enemies: ${enemies.length} (Ghosts: ${enemies.filter(e => e instanceof GhostEnemy).length}, Goblins: ${enemies.filter(e => e instanceof GoblinEnemy).length})`, 10, 120);
+            
+            // Request next frame
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        gameLoop();
+    </script>
+</body>
+</html>
+                
