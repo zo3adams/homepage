@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AYSO Lineup Generator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <h1>⚽ AYSO Lineup Generator</h1>
+    <p class="subtitle">Create fair and balanced soccer lineups for youth games</p>
+    <div class="how-to-link"><a href="how-to-use.html">How to Use</a></div>
+
+    <div class="formation-selector">
+        <div>
+            <label for="matchSize">Match Size:</label>
+            <select id="matchSize" onchange="onMatchSizeChange()">
+                <option value="5v5">5v5</option>
+                <option value="7v7" selected>7v7</option>
+                <option value="9v9">9v9</option>
+                <option value="11v11">11v11</option>
+            </select>
+        </div>
+        <div>
+            <label for="formation">Formation:</label>
+            <select id="formation" onchange="onFormationChange()">
+                <!-- Options populated by JavaScript -->
+            </select>
+        </div>
+    </div>
+
+    <div id="inputSection" class="section">
+        <h2>1. Enter Player Data</h2>
+        <textarea id="csvInput" placeholder="Paste player data as CSV:
+Name, Present, [Position codes]
+John Smith, yes, 7, 6, 6, 8, 7, 8, 9
+Jane Doe, yes, 5, 7, 8, 6, 7, 6, 8
+...
+
+Or just names:
+John Smith
+Jane Doe
+..."></textarea>
+        <div class="help-text">
+            Format: Name, Present (yes/no), then skill levels 0-10 for each position<br>
+            Or just paste player names and fill out the table below
+        </div>
+        <button onclick="parseCSV()">Load Players</button>
+    </div>
+
+    <div id="playerTableSection" class="section hidden">
+        <h2>2. Player Information</h2>
+        <p class="help-text">Edit player information and skill levels (5+ required for each position)</p>
+        <div style="overflow-x: auto;">
+            <table id="playerTable">
+                <thead id="playerTableHead">
+                    <!-- Header dynamically generated -->
+                </thead>
+                <tbody id="playerTableBody">
+                </tbody>
+            </table>
+        </div>
+        <button onclick="generateLineup()">Generate Lineup</button>
+        <button class="secondary" onclick="addPlayerRow()">Add Player</button>
+    </div>
+
+    <div id="lineupSection" class="section hidden">
+        <h2>3. Generated Lineup</h2>
+        <button onclick="window.print()" class="no-print">🖨️ Print (landscape)</button>
+        <button id="updateLineupBtn" class="no-print" onclick="updateLineupFromTable()" style="background: #FF9800; display: none;">✓ Update Lineup</button>
+
+        <div style="overflow-x: auto;">
+            <table id="lineupTable">
+                <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Quarter 1</th>
+                        <th>Quarter 2</th>
+                        <th>Quarter 3</th>
+                        <th>Quarter 4</th>
+                    </tr>
+                </thead>
+                <tbody id="lineupTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="fieldVisualContainer" class="quarters-grid">
+            <!-- Field visuals will be inserted here -->
+        </div>
+
+        <div id="shareableLink" class="no-print" style="margin: 15px 0; padding: 10px; background: #f0f0f0; border-radius: 4px; display: none;">
+            <strong>Shareable Link:</strong><br>
+            <input type="text" id="shareUrl" readonly style="width: 100%; padding: 8px; margin-top: 5px; font-size: 0.9em; border: 1px solid #ddd; border-radius: 3px;">
+            <button onclick="copyShareLink()" style="margin-top: 8px;">📋 Copy Link</button>
+        </div>
+    </div>
+
+    <script>
+        // Formation configurations
+        const formationConfigs = {
+            '5v5': {
+                '1-2-1': {
+                    positions: ['GK', 'LD', 'RD', 'ST'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LD': 'Left Defender',
+                        'RD': 'Right Defender',
+                        'ST': 'Striker'
+                    }
+                },
+                '2-2': {
+                    positions: ['GK', 'LD', 'RD', 'LF', 'RF'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LD': 'Left Defender',
+                        'RD': 'Right Defender',
+                        'LF': 'Left Forward',
+                        'RF': 'Right Forward'
+                    }
+                },
+                '2-1-1': {
+                    positions: ['GK', 'LD', 'RD', 'CM', 'ST'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LD': 'Left Defender',
+                        'RD': 'Right Defender',
+                        'CM': 'Center Mid',
+                        'ST': 'Striker'
+                    }
+                }
+            },
+            '7v7': {
+                '2-3-1': {
+                    positions: ['GK', 'LD', 'RD', 'LC', 'MC', 'RC', 'ST'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LD': 'Left Defender',
+                        'RD': 'Right Defender',
+                        'LC': 'Left Center',
+                        'MC': 'Mid Center',
+                        'RC': 'Right Center',
+                        'ST': 'Striker'
+                    }
+                },
+                '3-2-1': {
+                    positions: ['GK', 'LD', 'CD', 'RD', 'LM', 'RM', 'ST'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LD': 'Left Defender',
+                        'CD': 'Center Defender',
+                        'RD': 'Right Defender',
+                        'LM': 'Left Mid',
+                        'RM': 'Right Mid',
+                        'ST': 'Striker'
+                    }
+                }
+            },
+            '9v9': {
+                '3-2-3': {
+                    positions: ['GK', 'LD', 'CD', 'RD', 'LM', 'RM', 'LF', 'CF', 'RF'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LD': 'Left Defender',
+                        'CD': 'Center Defender',
+                        'RD': 'Right Defender',
+                        'LM': 'Left Mid',
+                        'RM': 'Right Mid',
+                        'LF': 'Left Forward',
+                        'CF': 'Center Forward',
+                        'RF': 'Right Forward'
+                    }
+                },
+                '3-3-2': {
+                    positions: ['GK', 'LD', 'CD', 'RD', 'LM', 'CM', 'RM', 'LS', 'RS'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LD': 'Left Defender',
+                        'CD': 'Center Defender',
+                        'RD': 'Right Defender',
+                        'LM': 'Left Mid',
+                        'CM': 'Center Mid',
+                        'RM': 'Right Mid',
+                        'LS': 'Left Striker',
+                        'RS': 'Right Striker'
+                    }
+                },
+                '4-3-1': {
+                    positions: ['GK', 'LB', 'LCB', 'RCB', 'RB', 'LM', 'CM', 'RM', 'ST'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LB': 'Left Back',
+                        'LCB': 'Left Center Back',
+                        'RCB': 'Right Center Back',
+                        'RB': 'Right Back',
+                        'LM': 'Left Mid',
+                        'CM': 'Center Mid',
+                        'RM': 'Right Mid',
+                        'ST': 'Striker'
+                    }
+                }
+            },
+            '11v11': {
+                '4-4-2': {
+                    positions: ['GK', 'LB', 'LCB', 'RCB', 'RB', 'LM', 'LCM', 'RCM', 'RM', 'LS', 'RS'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LB': 'Left Back',
+                        'LCB': 'Left Center Back',
+                        'RCB': 'Right Center Back',
+                        'RB': 'Right Back',
+                        'LM': 'Left Mid',
+                        'LCM': 'Left Center Mid',
+                        'RCM': 'Right Center Mid',
+                        'RM': 'Right Mid',
+                        'LS': 'Left Striker',
+                        'RS': 'Right Striker'
+                    }
+                },
+                '4-3-3': {
+                    positions: ['GK', 'LB', 'LCB', 'RCB', 'RB', 'LCM', 'CM', 'RCM', 'LW', 'ST', 'RW'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LB': 'Left Back',
+                        'LCB': 'Left Center Back',
+                        'RCB': 'Right Center Back',
+                        'RB': 'Right Back',
+                        'LCM': 'Left Center Mid',
+                        'CM': 'Center Mid',
+                        'RCM': 'Right Center Mid',
+                        'LW': 'Left Wing',
+                        'ST': 'Striker',
+                        'RW': 'Right Wing'
+                    }
+                },
+                '4-2-3-1': {
+                    positions: ['GK', 'LB', 'LCB', 'RCB', 'RB', 'LDM', 'RDM', 'LAM', 'CAM', 'RAM', 'ST'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LB': 'Left Back',
+                        'LCB': 'Left Center Back',
+                        'RCB': 'Right Center Back',
+                        'RB': 'Right Back',
+                        'LDM': 'Left Def Mid',
+                        'RDM': 'Right Def Mid',
+                        'LAM': 'Left Attack Mid',
+                        'CAM': 'Center Attack Mid',
+                        'RAM': 'Right Attack Mid',
+                        'ST': 'Striker'
+                    }
+                },
+                '3-5-2': {
+                    positions: ['GK', 'LCB', 'CB', 'RCB', 'LM', 'LCM', 'CM', 'RCM', 'RM', 'LS', 'RS'],
+                    positionNames: {
+                        'GK': 'Goalkeeper',
+                        'LCB': 'Left Center Back',
+                        'CB': 'Center Back',
+                        'RCB': 'Right Center Back',
+                        'LM': 'Left Mid',
+                        'LCM': 'Left Center Mid',
+                        'CM': 'Center Mid',
+                        'RCM': 'Right Center Mid',
+                        'RM': 'Right Mid',
+                        'LS': 'Left Striker',
+                        'RS': 'Right Striker'
+                    }
+                }
+            }
+        };
+
+        // Current formation state
+        let currentMatchSize = '7v7';
+        let currentFormation = '2-3-1';
+
+        let players = [];
+        let lineup = { 1: {}, 2: {}, 3: {}, 4: {} };
+        let positions = formationConfigs[currentMatchSize][currentFormation].positions;
+        let positionNames = formationConfigs[currentMatchSize][currentFormation].positionNames;
+
+        // Initialize formation dropdowns
+        function initFormationSelectors() {
+            const matchSizeSelect = document.getElementById('matchSize');
+            const formationSelect = document.getElementById('formation');
+
+            // Set current match size
+            matchSizeSelect.value = currentMatchSize;
+
+            // Populate formation dropdown based on current match size
+            updateFormationDropdown();
+        }
+
+        function updateFormationDropdown() {
+            const formationSelect = document.getElementById('formation');
+            formationSelect.innerHTML = '';
+
+            const formations = Object.keys(formationConfigs[currentMatchSize]);
+            formations.forEach(formation => {
+                const option = document.createElement('option');
+                option.value = formation;
+                option.textContent = formation;
+                if (formation === currentFormation) {
+                    option.selected = true;
+                }
+                formationSelect.appendChild(option);
+            });
+        }
+
+        function onMatchSizeChange() {
+            const matchSizeSelect = document.getElementById('matchSize');
+            currentMatchSize = matchSizeSelect.value;
+
+            // Set default formation for new match size
+            currentFormation = Object.keys(formationConfigs[currentMatchSize])[0];
+
+            updateFormationDropdown();
+            updatePositions();
+        }
+
+        function onFormationChange() {
+            const formationSelect = document.getElementById('formation');
+            currentFormation = formationSelect.value;
+            updatePositions();
+        }
+
+        function updatePositions() {
+            // Update positions arrays
+            positions = formationConfigs[currentMatchSize][currentFormation].positions;
+            positionNames = formationConfigs[currentMatchSize][currentFormation].positionNames;
+
+            // Update all players to have skills for new positions
+            players.forEach(player => {
+                const newSkills = {};
+                positions.forEach(pos => {
+                    // Keep existing skill if it exists, otherwise default to 5
+                    newSkills[pos] = player.skills[pos] !== undefined ? player.skills[pos] : 5;
+                });
+                player.skills = newSkills;
+            });
+
+            // Re-render player table if it's visible
+            if (!document.getElementById('playerTableSection').classList.contains('hidden')) {
+                renderPlayerTable();
+            }
+
+            // Clear lineup when formation changes
+            lineup = { 1: {}, 2: {}, 3: {}, 4: {} };
+            document.getElementById('lineupSection').classList.add('hidden');
+        }
+
+        // Load from URL on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            initFormationSelectors();
+            loadFromURL();
+        });
+
+        function loadFromURL() {
+            const params = new URLSearchParams(window.location.search);
+
+            // Load formation from URL
+            const urlFormation = params.get('formation');
+            if (urlFormation) {
+                const parts = urlFormation.split('_');
+                if (parts.length === 2) {
+                    const matchSize = parts[0];
+                    const formation = parts[1];
+                    if (formationConfigs[matchSize] && formationConfigs[matchSize][formation]) {
+                        currentMatchSize = matchSize;
+                        currentFormation = formation;
+                        positions = formationConfigs[currentMatchSize][currentFormation].positions;
+                        positionNames = formationConfigs[currentMatchSize][currentFormation].positionNames;
+
+                        // Update selectors
+                        document.getElementById('matchSize').value = currentMatchSize;
+                        updateFormationDropdown();
+                    }
+                }
+            }
+
+            const playerData = [];
+            const lineupData = { 1: {}, 2: {}, 3: {}, 4: {} };
+            let hasLineupData = false;
+
+            // Parse player data from URL
+            let playerIndex = 0;
+            while (true) {
+                const playerKey = `player${playerIndex}`;
+                const name = params.get(playerKey);
+
+                if (!name) break;
+
+                const player = {
+                    name: name,
+                    present: params.get(`${playerKey}_present`) !== 'false',
+                    skills: {}
+                };
+
+                // Load skills
+                positions.forEach(pos => {
+                    const skillValue = params.get(`${playerKey}_${pos}_skill`);
+                    player.skills[pos] = skillValue ? parseInt(skillValue) : 5;
+                });
+
+                playerData.push(player);
+
+                // Load lineup positions for this player
+                for (let q = 1; q <= 4; q++) {
+                    const position = params.get(`${playerKey}_position_q${q}`);
+                    if (position && positions.includes(position)) {
+                        if (!lineupData[q].positions) lineupData[q].positions = {};
+                        lineupData[q].positions[position] = name;
+                        hasLineupData = true;
+                    }
+
+                    const isBenched = params.get(`${playerKey}_bench_q${q}`);
+                    if (isBenched === 'true') {
+                        if (!lineupData[q].bench) lineupData[q].bench = [];
+                        lineupData[q].bench.push(name);
+                        hasLineupData = true;
+                    }
+                }
+
+                playerIndex++;
+            }
+
+            // If we found player data, populate the UI
+            if (playerData.length > 0) {
+                players = playerData;
+                renderPlayerTable();
+                document.getElementById('playerTableSection').classList.remove('hidden');
+
+                // If we also have lineup data, render the lineup
+                if (hasLineupData) {
+                    lineup = lineupData;
+                    renderLineupTable();
+                    renderFieldVisuals();
+                    document.getElementById('lineupSection').classList.remove('hidden');
+                    generateShareableURL();
+                }
+            }
+        }
+
+        function parseCSV() {
+            const input = document.getElementById('csvInput').value.trim();
+            if (!input) return;
+
+            const lines = input.split('\n');
+            players = [];
+
+            lines.forEach((line, index) => {
+                line = line.trim();
+                if (!line) return;
+
+                const parts = line.split(',').map(p => p.trim());
+
+                // Skip header row if it's the first line and contains column names
+                if (index === 0 && parts.length >= 2) {
+                    const firstPart = parts[0].toLowerCase();
+                    const secondPart = parts[1].toLowerCase();
+                    // Check if this looks like a header row
+                    if (firstPart === 'name' ||
+                        (firstPart.includes('name') && secondPart === 'present') ||
+                        (firstPart.includes('player') && secondPart === 'present')) {
+                        return; // Skip this line
+                    }
+                }
+
+                if (parts.length === 1) {
+                    // Just a name - initialize with default skills for current formation
+                    const skills = {};
+                    positions.forEach(pos => {
+                        skills[pos] = 5;
+                    });
+                    players.push({
+                        name: parts[0],
+                        present: true,
+                        skills: skills
+                    });
+                } else if (parts.length >= positions.length + 2) {
+                    // Full data - parse skills for current formation
+                    const skills = {};
+                    positions.forEach((pos, idx) => {
+                        skills[pos] = parseInt(parts[idx + 2]) || 0;
+                    });
+                    players.push({
+                        name: parts[0],
+                        present: parts[1].toLowerCase().startsWith('y') || parts[1] === '1',
+                        skills: skills
+                    });
+                }
+            });
+
+            renderPlayerTable();
+            document.getElementById('playerTableSection').classList.remove('hidden');
+        }
+
+        function addPlayerRow() {
+            const skills = {};
+            positions.forEach(pos => {
+                skills[pos] = 5;
+            });
+            players.push({
+                name: 'New Player',
+                present: true,
+                skills: skills
+            });
+            renderPlayerTable();
+        }
+
+        function renderPlayerTable() {
+            // Render table header
+            const thead = document.getElementById('playerTableHead');
+            thead.innerHTML = '';
+            const headerRow = thead.insertRow();
+
+            const nameHeader = document.createElement('th');
+            nameHeader.textContent = 'Name';
+            headerRow.appendChild(nameHeader);
+
+            const presentHeader = document.createElement('th');
+            presentHeader.textContent = 'Present';
+            headerRow.appendChild(presentHeader);
+
+            positions.forEach(pos => {
+                const th = document.createElement('th');
+                th.textContent = pos;
+                headerRow.appendChild(th);
+            });
+
+            // Render table body
+            const tbody = document.getElementById('playerTableBody');
+            tbody.innerHTML = '';
+
+            players.forEach((player, idx) => {
+                const row = tbody.insertRow();
+
+                // Name
+                const nameCell = row.insertCell();
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.value = player.name;
+                nameInput.onchange = () => players[idx].name = nameInput.value;
+                nameCell.appendChild(nameInput);
+
+                // Present
+                const presentCell = row.insertCell();
+                const presentCheck = document.createElement('input');
+                presentCheck.type = 'checkbox';
+                presentCheck.checked = player.present;
+                presentCheck.onchange = () => players[idx].present = presentCheck.checked;
+                presentCell.appendChild(presentCheck);
+
+                // Skills
+                positions.forEach(pos => {
+                    const skillCell = row.insertCell();
+                    const skillInput = document.createElement('input');
+                    skillInput.type = 'number';
+                    skillInput.min = '0';
+                    skillInput.max = '10';
+                    skillInput.value = player.skills[pos];
+
+                    // Highlight invalid values
+                    const updateValidation = () => {
+                        const val = parseInt(skillInput.value);
+                        if (isNaN(val) || val < 0 || val > 10) {
+                            skillInput.classList.add('invalid-skill');
+                        } else {
+                            skillInput.classList.remove('invalid-skill');
+                        }
+                    };
+
+                    // Check initial value
+                    updateValidation();
+
+                    skillInput.oninput = updateValidation;
+                    skillInput.onchange = () => {
+                        const val = parseInt(skillInput.value);
+                        players[idx].skills[pos] = isNaN(val) ? 0 : Math.max(0, Math.min(10, val));
+                        updateValidation();
+                    };
+                    skillCell.appendChild(skillInput);
+                });
+            });
+        }
+
+        function generateLineup() {
+            const presentPlayers = players.filter(p => p.present);
+            const requiredPlayers = positions.length;
+
+            if (presentPlayers.length < requiredPlayers) {
+                alert(`Need at least ${requiredPlayers} players present to generate a lineup for ${currentMatchSize} ${currentFormation}!`);
+                return;
+            }
+
+            // Track quarters played and quarters benched per player
+            const playerStats = {};
+            presentPlayers.forEach(p => {
+                playerStats[p.name] = {
+                    quartersPlayed: 0,
+                    quartersBenched: 0,
+                    positionsPlayed: []
+                };
+            });
+
+            // Generate lineup for each quarter
+            for (let quarter = 1; quarter <= 4; quarter++) {
+                lineup[quarter] = { positions: {}, bench: [] };
+                const availablePlayers = [...presentPlayers];
+
+                // For each position, find eligible players and select based on:
+                // 1. Must have played fewer quarters (fairness)
+                // 2. Must have skill >= 5 for position
+                // 3. Prefer rotating positions
+                positions.forEach(pos => {
+                    const eligible = availablePlayers.filter(p => {
+                        const skill = p.skills[pos];
+                        return skill >= 5;
+                    });
+
+                    // Sort by: fewest quarters played, then fewest times in this position, then highest skill
+                    eligible.sort((a, b) => {
+                        const aStats = playerStats[a.name];
+                        const bStats = playerStats[b.name];
+
+                        // Priority 1: Fewest quarters played
+                        if (aStats.quartersPlayed !== bStats.quartersPlayed) {
+                            return aStats.quartersPlayed - bStats.quartersPlayed;
+                        }
+
+                        // Priority 2: Hasn't played this position yet
+                        const aPlayedPos = aStats.positionsPlayed.filter(p => p === pos).length;
+                        const bPlayedPos = bStats.positionsPlayed.filter(p => p === pos).length;
+                        if (aPlayedPos !== bPlayedPos) {
+                            return aPlayedPos - bPlayedPos;
+                        }
+
+                        // Priority 3: Higher skill
+                        return b.skills[pos] - a.skills[pos];
+                    });
+
+                    if (eligible.length > 0) {
+                        const selected = eligible[0];
+                        lineup[quarter].positions[pos] = selected.name;
+                        playerStats[selected.name].quartersPlayed++;
+                        playerStats[selected.name].positionsPlayed.push(pos);
+
+                        // Remove from available
+                        const idx = availablePlayers.findIndex(p => p.name === selected.name);
+                        availablePlayers.splice(idx, 1);
+                    } else {
+                        lineup[quarter].positions[pos] = 'NEED PLAYER';
+                    }
+                });
+
+                // Remaining players go to bench
+                availablePlayers.forEach(p => {
+                    lineup[quarter].bench.push(p.name);
+                    playerStats[p.name].quartersBenched++;
+                });
+            }
+
+            renderLineupTable();
+            renderFieldVisuals();
+            document.getElementById('lineupSection').classList.remove('hidden');
+            generateShareableURL();
+        }
+
+        function generateShareableURL() {
+            const params = new URLSearchParams();
+
+            // Store formation
+            params.set('formation', `${currentMatchSize}_${currentFormation}`);
+
+            players.forEach((player, idx) => {
+                const playerKey = `player${idx}`;
+
+                // Store player name and present status
+                params.set(playerKey, player.name);
+                params.set(`${playerKey}_present`, player.present);
+
+                // Store skills
+                positions.forEach(pos => {
+                    params.set(`${playerKey}_${pos}_skill`, player.skills[pos]);
+                });
+
+                // Store lineup positions
+                for (let q = 1; q <= 4; q++) {
+                    // Check if player is in a position this quarter
+                    let foundPosition = null;
+                    for (const [pos, name] of Object.entries(lineup[q].positions || {})) {
+                        if (name === player.name) {
+                            foundPosition = pos;
+                            break;
+                        }
+                    }
+
+                    if (foundPosition) {
+                        params.set(`${playerKey}_position_q${q}`, foundPosition);
+                    }
+
+                    // Check if player is on bench this quarter
+                    if (lineup[q].bench && lineup[q].bench.includes(player.name)) {
+                        params.set(`${playerKey}_bench_q${q}`, 'true');
+                    }
+                }
+            });
+
+            const baseUrl = window.location.origin + window.location.pathname;
+            const shareUrl = `${baseUrl}?${params.toString()}`;
+
+            document.getElementById('shareUrl').value = shareUrl;
+            document.getElementById('shareableLink').style.display = 'block';
+        }
+
+        function copyShareLink() {
+            const shareUrlInput = document.getElementById('shareUrl');
+            shareUrlInput.select();
+            shareUrlInput.setSelectionRange(0, 99999); // For mobile devices
+
+            try {
+                document.execCommand('copy');
+                alert('Link copied to clipboard!');
+            } catch (err) {
+                // Fallback for modern browsers
+                navigator.clipboard.writeText(shareUrlInput.value).then(() => {
+                    alert('Link copied to clipboard!');
+                }).catch(() => {
+                    alert('Failed to copy. Please copy the link manually.');
+                });
+            }
+        }
+
+        function updateLineupFromTable() {
+            // Read all editable cells and update the lineup object
+            const cells = document.querySelectorAll('.editable-cell');
+
+            // Reset lineup
+            for (let q = 1; q <= 4; q++) {
+                lineup[q] = { positions: {}, bench: [] };
+            }
+
+            cells.forEach(cell => {
+                const position = cell.dataset.position;
+                const quarter = parseInt(cell.dataset.quarter);
+                const content = cell.textContent.trim();
+
+                if (position === 'BENCH') {
+                    // Parse comma-separated bench players
+                    if (content && content !== '-') {
+                        lineup[quarter].bench = content.split(',').map(name => name.trim()).filter(name => name);
+                    }
+                } else {
+                    // Single player name for position
+                    if (content && content !== '-') {
+                        lineup[quarter].positions[position] = content;
+                    }
+                }
+            });
+
+            // Re-render the field visuals with updated lineup
+            renderFieldVisuals();
+
+            // Update the shareable URL
+            generateShareableURL();
+
+            // Hide the update button
+            document.getElementById('updateLineupBtn').style.display = 'none';
+
+            alert('Lineup updated successfully!');
+        }
+
+        function renderLineupTable() {
+            const tbody = document.getElementById('lineupTableBody');
+            tbody.innerHTML = '';
+
+            positions.forEach(pos => {
+                const row = tbody.insertRow();
+                const posCell = row.insertCell();
+                posCell.textContent = positionNames[pos];
+                posCell.style.fontWeight = 'bold';
+
+                for (let q = 1; q <= 4; q++) {
+                    const cell = row.insertCell();
+                    cell.textContent = lineup[q].positions[pos] || '-';
+                    cell.className = 'editable-cell';
+                    cell.contentEditable = 'true';
+                    cell.dataset.position = pos;
+                    cell.dataset.quarter = q;
+
+                    // Show update button when cell is edited
+                    cell.addEventListener('input', () => {
+                        document.getElementById('updateLineupBtn').style.display = 'inline-block';
+                    });
+                }
+            });
+
+            // Bench row
+            const benchRow = tbody.insertRow();
+            const benchCell = benchRow.insertCell();
+            benchCell.textContent = 'BENCH';
+            benchCell.style.fontWeight = 'bold';
+
+            for (let q = 1; q <= 4; q++) {
+                const cell = benchRow.insertCell();
+                cell.textContent = lineup[q].bench.join(', ') || '-';
+                cell.className = 'editable-cell';
+                cell.contentEditable = 'true';
+                cell.dataset.position = 'BENCH';
+                cell.dataset.quarter = q;
+
+                // Show update button when cell is edited
+                cell.addEventListener('input', () => {
+                    document.getElementById('updateLineupBtn').style.display = 'inline-block';
+                });
+            }
+        }
+
+        function renderFieldVisuals() {
+            const container = document.getElementById('fieldVisualContainer');
+            container.innerHTML = '';
+
+            for (let q = 1; q <= 4; q++) {
+                const quarterDiv = document.createElement('div');
+                quarterDiv.id = `quarter${q}Field`;
+                quarterDiv.className = 'field-visual';
+
+                quarterDiv.innerHTML = `
+                    <div class="quarter-header">
+                        <h3 class="quarter-title">Quarter ${q}</h3>
+                        ${renderBench(q)}
+                    </div>
+                    <div class="field-markings">
+                        ${renderPositions(q)}
+                    </div>
+                `;
+
+                container.appendChild(quarterDiv);
+
+                // Attach drag-and-drop event listeners after rendering
+                attachDragDropListeners(q);
+            }
+        }
+
+        function getPositionLayout() {
+            const layouts = {
+                '5v5': {
+                    '1-2-1': {
+                        'GK': { top: '85%', left: '50%' },
+                        'LD': { top: '55%', left: '30%' },
+                        'RD': { top: '55%', left: '70%' },
+                        'ST': { top: '15%', left: '50%' }
+                    },
+                    '2-2': {
+                        'GK': { top: '85%', left: '50%' },
+                        'LD': { top: '60%', left: '30%' },
+                        'RD': { top: '60%', left: '70%' },
+                        'LF': { top: '20%', left: '35%' },
+                        'RF': { top: '20%', left: '65%' }
+                    },
+                    '2-1-1': {
+                        'GK': { top: '85%', left: '50%' },
+                        'LD': { top: '60%', left: '30%' },
+                        'RD': { top: '60%', left: '70%' },
+                        'CM': { top: '35%', left: '50%' },
+                        'ST': { top: '15%', left: '50%' }
+                    }
+                },
+                '7v7': {
+                    '2-3-1': {
+                        'GK': { top: '85%', left: '50%' },
+                        'LD': { top: '60%', left: '25%' },
+                        'RD': { top: '60%', left: '75%' },
+                        'LC': { top: '35%', left: '20%' },
+                        'MC': { top: '30%', left: '50%' },
+                        'RC': { top: '35%', left: '80%' },
+                        'ST': { top: '8%', left: '50%' }
+                    },
+                    '3-2-1': {
+                        'GK': { top: '85%', left: '50%' },
+                        'LD': { top: '65%', left: '20%' },
+                        'CD': { top: '65%', left: '50%' },
+                        'RD': { top: '65%', left: '80%' },
+                        'LM': { top: '35%', left: '25%' },
+                        'RM': { top: '35%', left: '75%' },
+                        'ST': { top: '10%', left: '50%' }
+                    }
+                },
+                '9v9': {
+                    '3-2-3': {
+                        'GK': { top: '88%', left: '50%' },
+                        'LD': { top: '68%', left: '20%' },
+                        'CD': { top: '68%', left: '50%' },
+                        'RD': { top: '68%', left: '80%' },
+                        'LM': { top: '43%', left: '25%' },
+                        'RM': { top: '43%', left: '75%' },
+                        'LF': { top: '15%', left: '20%' },
+                        'CF': { top: '10%', left: '50%' },
+                        'RF': { top: '15%', left: '80%' }
+                    },
+                    '3-3-2': {
+                        'GK': { top: '88%', left: '50%' },
+                        'LD': { top: '68%', left: '20%' },
+                        'CD': { top: '68%', left: '50%' },
+                        'RD': { top: '68%', left: '80%' },
+                        'LM': { top: '43%', left: '15%' },
+                        'CM': { top: '40%', left: '50%' },
+                        'RM': { top: '43%', left: '85%' },
+                        'LS': { top: '15%', left: '35%' },
+                        'RS': { top: '15%', left: '65%' }
+                    },
+                    '4-3-1': {
+                        'GK': { top: '88%', left: '50%' },
+                        'LB': { top: '70%', left: '10%' },
+                        'LCB': { top: '70%', left: '37%' },
+                        'RCB': { top: '70%', left: '63%' },
+                        'RB': { top: '70%', left: '90%' },
+                        'LM': { top: '42%', left: '20%' },
+                        'CM': { top: '38%', left: '50%' },
+                        'RM': { top: '42%', left: '80%' },
+                        'ST': { top: '10%', left: '50%' }
+                    }
+                },
+                '11v11': {
+                    '4-4-2': {
+                        'GK': { top: '90%', left: '50%' },
+                        'LB': { top: '72%', left: '10%' },
+                        'LCB': { top: '72%', left: '37%' },
+                        'RCB': { top: '72%', left: '63%' },
+                        'RB': { top: '72%', left: '90%' },
+                        'LM': { top: '48%', left: '10%' },
+                        'LCM': { top: '45%', left: '37%' },
+                        'RCM': { top: '45%', left: '63%' },
+                        'RM': { top: '48%', left: '90%' },
+                        'LS': { top: '18%', left: '35%' },
+                        'RS': { top: '18%', left: '65%' }
+                    },
+                    '4-3-3': {
+                        'GK': { top: '90%', left: '50%' },
+                        'LB': { top: '72%', left: '10%' },
+                        'LCB': { top: '72%', left: '37%' },
+                        'RCB': { top: '72%', left: '63%' },
+                        'RB': { top: '72%', left: '90%' },
+                        'LCM': { top: '48%', left: '25%' },
+                        'CM': { top: '45%', left: '50%' },
+                        'RCM': { top: '48%', left: '75%' },
+                        'LW': { top: '18%', left: '10%' },
+                        'ST': { top: '12%', left: '50%' },
+                        'RW': { top: '18%', left: '90%' }
+                    },
+                    '4-2-3-1': {
+                        'GK': { top: '90%', left: '50%' },
+                        'LB': { top: '72%', left: '10%' },
+                        'LCB': { top: '72%', left: '37%' },
+                        'RCB': { top: '72%', left: '63%' },
+                        'RB': { top: '72%', left: '90%' },
+                        'LDM': { top: '55%', left: '35%' },
+                        'RDM': { top: '55%', left: '65%' },
+                        'LAM': { top: '32%', left: '15%' },
+                        'CAM': { top: '28%', left: '50%' },
+                        'RAM': { top: '32%', left: '85%' },
+                        'ST': { top: '10%', left: '50%' }
+                    },
+                    '3-5-2': {
+                        'GK': { top: '90%', left: '50%' },
+                        'LCB': { top: '72%', left: '25%' },
+                        'CB': { top: '72%', left: '50%' },
+                        'RCB': { top: '72%', left: '75%' },
+                        'LM': { top: '48%', left: '5%' },
+                        'LCM': { top: '45%', left: '30%' },
+                        'CM': { top: '42%', left: '50%' },
+                        'RCM': { top: '45%', left: '70%' },
+                        'RM': { top: '48%', left: '95%' },
+                        'LS': { top: '18%', left: '35%' },
+                        'RS': { top: '18%', left: '65%' }
+                    }
+                }
+            };
+
+            return layouts[currentMatchSize][currentFormation];
+        }
+
+        function renderPositions(quarter) {
+            const positionLayout = getPositionLayout();
+
+            let html = '';
+            positions.forEach(pos => {
+                const layout = positionLayout[pos];
+                const playerName = lineup[quarter].positions[pos] || 'Need Player';
+                html += `
+                    <div class="position" draggable="true"
+                         data-quarter="${quarter}"
+                         data-position="${pos}"
+                         data-player="${playerName}"
+                         style="top: ${layout.top}; left: ${layout.left}; transform: translate(-50%, -50%);">
+                        <span class="position-label">${positionNames[pos]}</span>
+                        <div class="player-name">${playerName}</div>
+                    </div>
+                `;
+            });
+
+            return html;
+        }
+
+        function renderBench(quarter) {
+            const benchPlayers = lineup[quarter].bench;
+
+            // Calculate bench counts up to this quarter
+            const benchCounts = {};
+            const presentPlayerNames = players.filter(p => p.present).map(p => p.name);
+
+            // Initialize counts for all present players
+            presentPlayerNames.forEach(name => {
+                benchCounts[name] = 0;
+            });
+
+            // Count benched quarters up to and including current quarter
+            for (let q = 1; q <= quarter; q++) {
+                if (lineup[q] && lineup[q].bench) {
+                    lineup[q].bench.forEach(name => {
+                        if (benchCounts[name] !== undefined) {
+                            benchCounts[name]++;
+                        }
+                    });
+                }
+            }
+
+            // Find the minimum bench count
+            const minBenchCount = Math.min(...Object.values(benchCounts));
+
+            const playersHtml = benchPlayers.length > 0
+                ? benchPlayers.map(name => {
+                    const thisPlayerBenchCount = benchCounts[name] || 0;
+                    // Mark as unfair if this player has been benched more than once and others haven't been benched at all
+                    const isUnfair = thisPlayerBenchCount > 1 && minBenchCount === 0;
+                    const unfairClass = isUnfair ? ' unfair' : '';
+                    return `<div class="bench-player${unfairClass}" draggable="true" data-quarter="${quarter}" data-player="${name}">${name}</div>`;
+                  }).join('')
+                : '<div style="color: rgba(255,255,255,0.6); font-size: 0.75em;">No players</div>';
+
+            return `
+                <div class="bench-area" data-quarter="${quarter}">
+                    <div class="bench-title">BENCH</div>
+                    <div class="bench-players">${playersHtml}</div>
+                </div>
+            `;
+        }
+
+        // Drag and Drop functionality
+        let draggedElement = null;
+        let draggedData = {};
+
+        function attachDragDropListeners(quarter) {
+            const fieldDiv = document.getElementById(`quarter${quarter}Field`);
+
+            // Position cards drag listeners
+            const positionCards = fieldDiv.querySelectorAll('.position');
+            positionCards.forEach(card => {
+                card.addEventListener('dragstart', handleDragStart);
+                card.addEventListener('dragend', handleDragEnd);
+                card.addEventListener('dragover', handleDragOver);
+                card.addEventListener('drop', handleDropOnPosition);
+            });
+
+            // Bench players drag listeners
+            const benchPlayers = fieldDiv.querySelectorAll('.bench-player');
+            benchPlayers.forEach(player => {
+                player.addEventListener('dragstart', handleDragStart);
+                player.addEventListener('dragend', handleDragEnd);
+            });
+
+            // Bench area drop listener
+            const benchArea = fieldDiv.querySelector('.bench-area');
+            if (benchArea) {
+                benchArea.addEventListener('dragover', handleDragOver);
+                benchArea.addEventListener('drop', handleDropOnBench);
+                benchArea.addEventListener('dragleave', handleDragLeave);
+            }
+        }
+
+        function handleDragStart(e) {
+            draggedElement = e.target;
+            draggedElement.classList.add('dragging');
+
+            draggedData = {
+                quarter: parseInt(e.target.dataset.quarter),
+                position: e.target.dataset.position,
+                player: e.target.dataset.player
+            };
+
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', e.target.innerHTML);
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+
+            // Remove drag-over styles from all elements
+            document.querySelectorAll('.drag-over').forEach(el => {
+                el.classList.remove('drag-over');
+            });
+        }
+
+        function handleDragOver(e) {
+            if (e.preventDefault) {
+                e.preventDefault();
+            }
+
+            e.dataTransfer.dropEffect = 'move';
+
+            if (e.target.classList.contains('position') || e.target.classList.contains('bench-area')) {
+                e.target.classList.add('drag-over');
+            }
+
+            return false;
+        }
+
+        function handleDragLeave(e) {
+            if (e.target.classList.contains('position') || e.target.classList.contains('bench-area')) {
+                e.target.classList.remove('drag-over');
+            }
+        }
+
+        function handleDropOnPosition(e) {
+            if (e.stopPropagation) {
+                e.stopPropagation();
+            }
+
+            e.preventDefault();
+            e.target.classList.remove('drag-over');
+
+            const targetPosition = e.target.dataset.position || e.target.closest('.position')?.dataset.position;
+            const targetQuarter = parseInt(e.target.dataset.quarter || e.target.closest('.position')?.dataset.quarter);
+
+            if (!targetPosition || !targetQuarter) return;
+
+            // Only allow drops within the same quarter
+            if (draggedData.quarter !== targetQuarter) {
+                alert('You can only swap players within the same quarter!');
+                return;
+            }
+
+            const draggedPlayer = draggedData.player;
+            const draggedPosition = draggedData.position;
+            const targetPlayer = lineup[targetQuarter].positions[targetPosition];
+
+            // Swap players between positions
+            if (draggedPosition && draggedPosition !== 'BENCH') {
+                // Dragging from position to position - swap
+                lineup[targetQuarter].positions[draggedPosition] = targetPlayer || null;
+                lineup[targetQuarter].positions[targetPosition] = draggedPlayer;
+
+                // Clean up empty positions
+                if (!lineup[targetQuarter].positions[draggedPosition]) {
+                    delete lineup[targetQuarter].positions[draggedPosition];
+                }
+            } else {
+                // Dragging from bench to position
+                lineup[targetQuarter].positions[targetPosition] = draggedPlayer;
+
+                // Remove from bench
+                const benchIndex = lineup[targetQuarter].bench.indexOf(draggedPlayer);
+                if (benchIndex > -1) {
+                    lineup[targetQuarter].bench.splice(benchIndex, 1);
+                }
+
+                // Move replaced player to bench
+                if (targetPlayer && targetPlayer !== 'Need Player') {
+                    lineup[targetQuarter].bench.push(targetPlayer);
+                }
+            }
+
+            // Update visuals and table
+            updateAfterDragDrop();
+
+            return false;
+        }
+
+        function handleDropOnBench(e) {
+            if (e.stopPropagation) {
+                e.stopPropagation();
+            }
+
+            e.preventDefault();
+            e.target.classList.remove('drag-over');
+
+            const targetQuarter = parseInt(e.target.dataset.quarter || e.target.closest('.bench-area')?.dataset.quarter);
+
+            if (!targetQuarter) return;
+
+            // Only allow drops within the same quarter
+            if (draggedData.quarter !== targetQuarter) {
+                alert('You can only move players within the same quarter!');
+                return;
+            }
+
+            const draggedPlayer = draggedData.player;
+            const draggedPosition = draggedData.position;
+
+            // Only process if dragging from a position (not bench to bench)
+            if (draggedPosition && draggedPosition !== 'BENCH') {
+                // Remove from position
+                delete lineup[targetQuarter].positions[draggedPosition];
+
+                // Add to bench
+                if (!lineup[targetQuarter].bench.includes(draggedPlayer)) {
+                    lineup[targetQuarter].bench.push(draggedPlayer);
+                }
+
+                // Update visuals and table
+                updateAfterDragDrop();
+            }
+
+            return false;
+        }
+
+        function updateAfterDragDrop() {
+            // Re-render field visuals
+            renderFieldVisuals();
+
+            // Re-render lineup table
+            renderLineupTable();
+
+            // Update shareable URL
+            generateShareableURL();
+        }
+
+    </script>
+</body>
+</html>
