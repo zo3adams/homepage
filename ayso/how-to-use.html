@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How to Use - AYSO Lineup Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .back-link {
+            margin-bottom: 30px;
+        }
+
+        .back-link a {
+            color: #2196F3;
+            text-decoration: none;
+        }
+
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+
+        .content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: #444;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        p {
+            line-height: 1.6;
+            color: #666;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚽ How to Use - AYSO Lineup Generator</h1>
+    <div class="back-link"><a href="index.html">← Back to Generator</a></div>
+
+    <div class="content">
+        <h2>Step 1: Enter Player Data</h2>
+        <p>Enter player data either as a list of names only, or as a csv formatted list of names, Y or N for present this game, and then 0-10 rankings for each position (<a href="csv_example.csv">like this example you can save and edit in Microsoft Excel</a>.) </p>
+        <div class="image-container"></div>
+        <img src="help_1_just_names.png" alt="Sample Player Data Input" style="display:inline-block; width: 48%;" />
+        <img src="help_2_and_rankings.png" alt="Sample Player Data with Rankings" style="display:inline-block; width: 48%;" />
+        </div>
+       Then press "Load Players" to get a table with the data you entered.
+       Rankings are used to prefer putting the strongest players in each position ( with some rotation to make it fair) in the generated line up - you can enter all zeros if you want pure balance or don't know rankings yet.
+
+
+        <h2>Step 2: Generate Lineup</h2>
+        <p>After clicking generate line up you'll have a table and visual rendering per quarter than you can edit (in table, or by dragging player cards around to switch positions.) 
+            <img src="help_3_generated_lineup.png" alt="Sample Generated Lineup" style="display:block; width: 100%; margin-top: 10px;" />
+        </p>
+
+        <h2>Step 3: Sharing</h2>
+        <p>The Sharable link creates a LONG url you can use too pull up the same lineup and rendering. URL is long because all the player data is contained in it. <br />
+           This can be used to share with fellow coaches and parents or just to save and get a filled out roster to start editing for the next game. <br />
+        If sharing in text, probably a good idea to <a href="https://tinyurl.com"> shorten the long URL first</a>.</p>
+
+        <a href="http://zoeadams.net/ayso/index.html?formation=7v7_2-3-1&player0=Bruce+Wayne&player0_present=true&player0_GK_skill=6&player0_LD_skill=4&player0_RD_skill=8&player0_LC_skill=5&player0_MC_skill=3&player0_RC_skill=8&player0_ST_skill=7&player0_position_q1=RD&player0_position_q2=RC&player0_bench_q3=true&player0_position_q4=ST&player1=Alfred+Pennyworth&player1_present=true&player1_GK_skill=4&player1_LD_skill=6&player1_RD_skill=7&player1_LC_skill=9&player1_MC_skill=5&player1_RC_skill=6&player1_ST_skill=8&player1_position_q1=LC&player1_position_q2=MC&player1_bench_q3=true&player1_position_q4=LD&player2=Barabara+Gordon&player2_present=true&player2_GK_skill=7&player2_LD_skill=8&player2_RD_skill=4&player2_LC_skill=6&player2_MC_skill=2&player2_RC_skill=5&player2_ST_skill=6&player2_position_q1=LD&player2_position_q2=ST&player2_bench_q3=true&player2_position_q4=GK&player3=Richard+Grayson&player3_present=true&player3_GK_skill=4&player3_LD_skill=1&player3_RD_skill=8&player3_LC_skill=7&player3_MC_skill=5&player3_RC_skill=7&player3_ST_skill=5&player3_position_q1=MC&player3_bench_q2=true&player3_position_q3=RD&player3_position_q4=LC&player4=Jason+Todd&player4_present=true&player4_GK_skill=8&player4_LD_skill=8&player4_RD_skill=8&player4_LC_skill=8&player4_MC_skill=8&player4_RC_skill=8&player4_ST_skill=9&player4_position_q1=GK&player4_position_q2=LC&player4_position_q3=RC&player4_bench_q4=true&player5=Damien+Wayne&player5_present=true&player5_GK_skill=3&player5_LD_skill=6&player5_RD_skill=4&player5_LC_skill=2&player5_MC_skill=1&player5_RC_skill=1&player5_ST_skill=9&player5_position_q1=ST&player5_bench_q2=true&player5_position_q3=LD&player5_bench_q4=true&player6=Katherine+Kane&player6_present=true&player6_GK_skill=4&player6_LD_skill=2&player6_RD_skill=5&player6_LC_skill=6&player6_MC_skill=5&player6_RC_skill=5&player6_ST_skill=8&player6_bench_q1=true&player6_position_q2=RD&player6_position_q3=LC&player6_position_q4=MC&player7=Selina+Kyle&player7_present=true&player7_GK_skill=6&player7_LD_skill=5&player7_RD_skill=4&player7_LC_skill=5&player7_MC_skill=5&player7_RC_skill=5&player7_ST_skill=9&player7_bench_q1=true&player7_position_q2=GK&player7_position_q3=MC&player7_position_q4=RC&player8=Lucias+Fox&player8_present=true&player8_GK_skill=8&player8_LD_skill=5&player8_RD_skill=6&player8_LC_skill=5&player8_MC_skill=4&player8_RC_skill=8&player8_ST_skill=6&player8_position_q1=RC&player8_bench_q2=true&player8_position_q3=GK&player8_bench_q4=true&player9=Terry+McGinnis&player9_present=true&player9_GK_skill=1&player9_LD_skill=5&player9_RD_skill=8&player9_LC_skill=5&player9_MC_skill=2&player9_RC_skill=3&player9_ST_skill=9&player9_bench_q1=true&player9_position_q2=LD&player9_position_q3=ST&player9_position_q4=RD"> long url example</a>
+        <h2>Tips and Best Practices</h2>
+        <a href="https://www.soccer.com/guide/guide-to-youth-soccer-positions"> Youth Soccer Positions Guide</a> <br />
+        <a href="https://www.soccerdrive.com/learn-how-to-coach-soccer/formations"> How to think about different formations </a><br />
+        <a href="https://wiki.ayso.org/wiki/Line-Up_Cards"> AYSO lineup cards</a> <br />
+    </div>
+</body>
+</html>
