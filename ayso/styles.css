@@ -167,6 +167,15 @@ td input[type="checkbox"] {
     background: #fff;
 }
 
+.editable-cell.duplicate-player {
+    background-color: #ffebee;
+    border: 2px solid #d32f2f;
+}
+
+.editable-cell.duplicate-player:hover {
+    background-color: #ffcdd2;
+}
+
 .quarters-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -216,6 +225,15 @@ td input[type="checkbox"] {
 .position.drag-over {
     background: #e3f2fd;
     border: 2px dashed #2196F3;
+}
+
+.position.duplicate-player {
+    background: #ffebee;
+    border: 2px solid #d32f2f;
+}
+
+.position.duplicate-player:hover {
+    background: #ffcdd2;
 }
 
 .position-label {
