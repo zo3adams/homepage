@@ -378,7 +378,10 @@ td input[type="checkbox"] {
     #inputSection,
     #playerTableSection,
     button,
-    .no-print {
+    .no-print,
+    .subtitle,
+    .how-to-link,
+    .formation-selector {
         display: none !important;
     }
 
@@ -413,14 +416,14 @@ td input[type="checkbox"] {
     }
 
     .quarters-grid {
-        gap: 5px;
+        gap: 15px;
         margin-top: 5px;
     }
 
     .field-visual {
         page-break-inside: avoid;
-        min-height: 180px;
-        max-height: 180px;
+        min-height: 190px;
+        max-height: 190px;
         padding: 8px;
         background: white !important;
         border: 2px solid #333;
@@ -429,6 +432,8 @@ td input[type="checkbox"] {
     .field-markings {
         border: 1px solid #666;
         padding: 8px;
+        position: relative;
+        height: 160px;
     }
 
     .quarter-title {

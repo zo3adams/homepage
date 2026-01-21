@@ -32,7 +32,7 @@
     <div id="inputSection" class="section">
         <h2>1. Enter Player Data</h2>
         <textarea id="csvInput" placeholder="Paste player data as CSV:
-Name, Present, [Position codes]
+Name, Present, [Skill ranking at each position - GK	LD	RD	LC	MC	RC	ST]
 John Smith, yes, 7, 6, 6, 8, 7, 8, 9
 Jane Doe, yes, 5, 7, 8, 6, 7, 6, 8
 ...
@@ -42,7 +42,7 @@ John Smith
 Jane Doe
 ..."></textarea>
         <div class="help-text">
-            Format: Name, Present (yes/no), then skill levels 0-10 for each position<br>
+            Format: Name, Present (yes/no), then skill levels 0-10 for each position: GK LD	RD	LC	MC	RC	ST<br>
             Or just paste player names and fill out the table below
         </div>
         <button onclick="parseCSV()">Load Players</button>
@@ -66,7 +66,7 @@ Jane Doe
 
     <div id="lineupSection" class="section hidden">
         <h2>3. Generated Lineup</h2>
-        <button onclick="window.print()" class="no-print">🖨️ Print (landscape)</button>
+        <button onclick="window.print()" class="no-print">🖨️ Print (Landscape)</button>
         <button id="updateLineupBtn" class="no-print" onclick="updateLineupFromTable()" style="background: #FF9800; display: none;">✓ Update Lineup</button>
 
         <div style="overflow-x: auto;">
@@ -613,7 +613,7 @@ Jane Doe
                 positions.forEach(pos => {
                     const eligible = availablePlayers.filter(p => {
                         const skill = p.skills[pos];
-                        return skill >= 5;
+                        return skill >= 2;
                     });
 
                     // Sort by: fewest quarters played, then fewest times in this position, then highest skill
