@@ -772,6 +772,37 @@ Jane Doe
             const tbody = document.getElementById('lineupTableBody');
             tbody.innerHTML = '';
 
+            // Detect duplicate players in each quarter
+            const duplicates = {};
+            for (let q = 1; q <= 4; q++) {
+                duplicates[q] = new Set();
+                const playerCount = {};
+
+                // Count occurrences of each player in positions
+                positions.forEach(pos => {
+                    const player = lineup[q].positions[pos];
+                    if (player && player !== 'Need Player') {
+                        playerCount[player] = (playerCount[player] || 0) + 1;
+                    }
+                });
+
+                // Count occurrences of each player on bench
+                if (lineup[q].bench) {
+                    lineup[q].bench.forEach(player => {
+                        if (player) {
+                            playerCount[player] = (playerCount[player] || 0) + 1;
+                        }
+                    });
+                }
+
+                // Mark players that appear more than once as duplicates
+                Object.keys(playerCount).forEach(player => {
+                    if (playerCount[player] > 1) {
+                        duplicates[q].add(player);
+                    }
+                });
+            }
+
             positions.forEach(pos => {
                 const row = tbody.insertRow();
                 const posCell = row.insertCell();
@@ -780,11 +811,17 @@ Jane Doe
 
                 for (let q = 1; q <= 4; q++) {
                     const cell = row.insertCell();
-                    cell.textContent = lineup[q].positions[pos] || '-';
+                    const playerName = lineup[q].positions[pos] || '-';
+                    cell.textContent = playerName;
                     cell.className = 'editable-cell';
                     cell.contentEditable = 'true';
                     cell.dataset.position = pos;
                     cell.dataset.quarter = q;
+
+                    // Highlight if this player is a duplicate in this quarter
+                    if (playerName !== '-' && duplicates[q].has(playerName)) {
+                        cell.classList.add('duplicate-player');
+                    }
 
                     // Show update button when cell is edited
                     cell.addEventListener('input', () => {
@@ -981,12 +1018,43 @@ Jane Doe
         function renderPositions(quarter) {
             const positionLayout = getPositionLayout();
 
+            // Detect duplicate players in this quarter
+            const playerCount = {};
+            const duplicates = new Set();
+
+            // Count occurrences of each player in positions
+            positions.forEach(pos => {
+                const player = lineup[quarter].positions[pos];
+                if (player && player !== 'Need Player') {
+                    playerCount[player] = (playerCount[player] || 0) + 1;
+                }
+            });
+
+            // Count occurrences of each player on bench
+            if (lineup[quarter].bench) {
+                lineup[quarter].bench.forEach(player => {
+                    if (player) {
+                        playerCount[player] = (playerCount[player] || 0) + 1;
+                    }
+                });
+            }
+
+            // Mark players that appear more than once as duplicates
+            Object.keys(playerCount).forEach(player => {
+                if (playerCount[player] > 1) {
+                    duplicates.add(player);
+                }
+            });
+
             let html = '';
             positions.forEach(pos => {
                 const layout = positionLayout[pos];
                 const playerName = lineup[quarter].positions[pos] || 'Need Player';
+                const isDuplicate = playerName !== 'Need Player' && duplicates.has(playerName);
+                const duplicateClass = isDuplicate ? ' duplicate-player' : '';
+
                 html += `
-                    <div class="position" draggable="true"
+                    <div class="position${duplicateClass}" draggable="true"
                          data-quarter="${quarter}"
                          data-position="${pos}"
                          data-player="${playerName}"
