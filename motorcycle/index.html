@@ -35,12 +35,15 @@
         }
         #gameCanvas {
             display: block;
-            width: 800px;
-            height: 600px;
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            aspect-ratio: 4 / 3;
             background: #72d7ee;
             border: 2px solid #000;
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
             image-rendering: pixelated;
+            touch-action: none;
         }
         #hud {
             position: absolute;
@@ -170,11 +173,13 @@
         <div id="message"></div>
         <div id="start-overlay">
             <div class="start-title">READY</div>
-            <div class="start-sub">Press <strong>↑</strong> or <strong>SPACE</strong> to ride<br><span style="font-size:13px; opacity:0.75;">← → steer · ↓ / Z brake · M mute · R restart</span></div>
+            <div class="start-sub" id="start-sub-desktop">Press <strong>↑</strong> or <strong>SPACE</strong> to ride<br><span style="font-size:13px; opacity:0.75;">← → steer · ↓ / Z brake · M mute · R restart</span></div>
+            <div class="start-sub" id="start-sub-mobile" style="display:none;">Hold phone level in landscape<br>Tap to start &middot; tilt to steer &middot; tilt forward to gas, back to brake</div>
         </div>
 
         <div id="controls-help">
-            ← → steer &nbsp;·&nbsp; ↑ / SPACE gas &nbsp;·&nbsp; ↓ / Z brake &nbsp;·&nbsp; M mute &nbsp;·&nbsp; R restart
+            <span id="controls-desktop">← → steer &nbsp;·&nbsp; ↑ / SPACE gas &nbsp;·&nbsp; ↓ / Z brake &nbsp;·&nbsp; M mute &nbsp;·&nbsp; R restart</span>
+            <span id="controls-mobile" style="display:none;">Tilt to steer &nbsp;·&nbsp; tilt forward = gas &nbsp;·&nbsp; tilt back = brake &nbsp;·&nbsp; tap to restart</span>
         </div>
     </div>
 
@@ -247,6 +252,20 @@
         let lastFrame = performance.now();
         bestEl.textContent = Math.floor(bestScore);
         const startOverlay = document.getElementById('start-overlay');
+
+        // mobile + tilt controls
+        const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+                         || (navigator.maxTouchPoints > 1 && /Mac|iPad/.test(navigator.platform));
+        const tilt = {
+            enabled: false,
+            calibrated: false,
+            zeroBeta: 0,
+            zeroGamma: 0,
+            beta: 0,
+            gamma: 0,
+            steerOverride: 0,        // -1..1 analog steering from tilt
+            controlsThrottle: false, // whether tilt is actively controlling gas/brake
+        };
 
         const keys = { left: false, right: false, gas: false, brake: false };
 
@@ -521,10 +540,16 @@
 
             position = increase(position, dt * speed, trackLength);
 
+            // process tilt input (mobile) → may set keys.gas/brake and tilt.steerOverride
+            processTiltInput();
+
             // steering input smoothing — aggressive, MotoGP-like response
             let steerTarget = 0;
             if (keys.left)  steerTarget =  1;
             if (keys.right) steerTarget = -1;
+            if (tilt.enabled && Math.abs(tilt.steerOverride) > 0.01) {
+                steerTarget = tilt.steerOverride;
+            }
             const steerRate = (steerTarget === 0 ? 16 : 10) * dt;
             steerInput = lerp(steerInput, steerTarget, clamp(steerRate, 0, 1));
 
@@ -1433,6 +1458,77 @@
             ctx.fillRect(0, 0, W, H);
         }
 
+        // ---------- TILT (mobile) ----------
+        function getOrientationAngle() {
+            if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+            if (typeof window.orientation === 'number') return window.orientation;
+            return 0;
+        }
+
+        function onDeviceOrientation(e) {
+            if (e.beta == null || e.gamma == null) return;
+            tilt.beta = e.beta;
+            tilt.gamma = e.gamma;
+            if (!tilt.calibrated) {
+                tilt.zeroBeta = e.beta;
+                tilt.zeroGamma = e.gamma;
+                tilt.calibrated = true;
+                tilt.enabled = true;
+            }
+        }
+
+        function enableTilt() {
+            if (tilt.enabled) return;
+            const Req = (typeof DeviceOrientationEvent !== 'undefined'
+                         && typeof DeviceOrientationEvent.requestPermission === 'function')
+                         ? DeviceOrientationEvent.requestPermission : null;
+            if (Req) {
+                Req().then((res) => {
+                    if (res === 'granted') {
+                        window.addEventListener('deviceorientation', onDeviceOrientation);
+                    }
+                }).catch(() => {});
+            } else {
+                window.addEventListener('deviceorientation', onDeviceOrientation);
+            }
+        }
+
+        function recalibrateTilt() {
+            tilt.calibrated = false;     // next event sample becomes the new zero
+        }
+
+        function processTiltInput() {
+            if (!tilt.enabled) return;
+            const angle = getOrientationAngle();
+            const dBeta  = tilt.beta  - tilt.zeroBeta;
+            const dGamma = tilt.gamma - tilt.zeroGamma;
+            let rawSteer, rawThrottle;
+            if (angle === 90) {
+                rawSteer    = -dBeta;
+                rawThrottle = -dGamma;
+            } else if (angle === -90 || angle === 270) {
+                rawSteer    =  dBeta;
+                rawThrottle =  dGamma;
+            } else if (angle === 180) {
+                rawSteer    = -dGamma;
+                rawThrottle = -dBeta;
+            } else {
+                rawSteer    =  dGamma;
+                rawThrottle = -dBeta;
+            }
+
+            const STEER_DEAD = 3;
+            const STEER_SAT  = 18;
+            const sSign = Math.sign(rawSteer);
+            const sMag  = Math.max(0, Math.abs(rawSteer) - STEER_DEAD) / (STEER_SAT - STEER_DEAD);
+            tilt.steerOverride = sSign * Math.min(1, sMag);
+
+            const THR_DEAD = 5;
+            if (rawThrottle >  THR_DEAD) { keys.gas = true;  keys.brake = false; tilt.controlsThrottle = true; }
+            else if (rawThrottle < -THR_DEAD) { keys.gas = false; keys.brake = true;  tilt.controlsThrottle = true; }
+            else if (tilt.controlsThrottle)   { keys.gas = false; keys.brake = false; }
+        }
+
         // ---------- INPUT ----------
         function setupControls() {
             document.addEventListener('keydown', (e) => {
@@ -1468,6 +1564,25 @@
             ['click', 'touchstart', 'keydown'].forEach(ev => {
                 window.addEventListener(ev, ensureAudio, { once: true });
             });
+
+            // mobile: tap to start (also begins audio, requests tilt permission, begins ride)
+            if (IS_MOBILE) {
+                const tapStart = (e) => {
+                    if (gameOver) {
+                        resetGame();
+                        // recalibrate on each restart so the user can rotate the phone if they want
+                        recalibrateTilt();
+                        enableTilt();
+                        ensureAudio();
+                        return;
+                    }
+                    enableTilt();
+                    ensureAudio();
+                    beginRide();
+                };
+                document.addEventListener('touchstart', tapStart, { passive: true });
+                document.addEventListener('click', tapStart);
+            }
         }
 
         // ---------- LOOP ----------
@@ -1483,6 +1598,13 @@
 
         // ---------- BOOT ----------
         function start() {
+            // swap help/start text for mobile
+            if (IS_MOBILE) {
+                document.getElementById('controls-desktop').style.display = 'none';
+                document.getElementById('controls-mobile').style.display = 'inline';
+                document.getElementById('start-sub-desktop').style.display = 'none';
+                document.getElementById('start-sub-mobile').style.display = 'block';
+            }
             setupControls();
             buildTrack();
             lastCheckpointSeg = -1;
