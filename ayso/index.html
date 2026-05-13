@@ -274,7 +274,23 @@ Jane Doe
         let currentFormation = '2-3-1';
 
         let players = [];
-        let lineup = { 1: {}, 2: {}, 3: {}, 4: {} };
+
+        function createQuarterLineup(data = {}) {
+            return {
+                positions: { ...(data.positions || {}) },
+                bench: Array.isArray(data.bench) ? [...data.bench] : []
+            };
+        }
+
+        function createLineup(data = {}) {
+            const nextLineup = {};
+            for (let quarter = 1; quarter <= 4; quarter++) {
+                nextLineup[quarter] = createQuarterLineup(data[quarter]);
+            }
+            return nextLineup;
+        }
+
+        let lineup = createLineup();
         let positions = formationConfigs[currentMatchSize][currentFormation].positions;
         let positionNames = formationConfigs[currentMatchSize][currentFormation].positionNames;
 
@@ -344,7 +360,7 @@ Jane Doe
             }
 
             // Clear lineup when formation changes
-            lineup = { 1: {}, 2: {}, 3: {}, 4: {} };
+            lineup = createLineup();
             document.getElementById('lineupSection').classList.add('hidden');
         }
 
@@ -378,7 +394,7 @@ Jane Doe
             }
 
             const playerData = [];
-            const lineupData = { 1: {}, 2: {}, 3: {}, 4: {} };
+            const lineupData = createLineup();
             let hasLineupData = false;
 
             // Parse player data from URL
@@ -407,14 +423,12 @@ Jane Doe
                 for (let q = 1; q <= 4; q++) {
                     const position = params.get(`${playerKey}_position_q${q}`);
                     if (position && positions.includes(position)) {
-                        if (!lineupData[q].positions) lineupData[q].positions = {};
                         lineupData[q].positions[position] = name;
                         hasLineupData = true;
                     }
 
                     const isBenched = params.get(`${playerKey}_bench_q${q}`);
                     if (isBenched === 'true') {
-                        if (!lineupData[q].bench) lineupData[q].bench = [];
                         lineupData[q].bench.push(name);
                         hasLineupData = true;
                     }
@@ -431,7 +445,7 @@ Jane Doe
 
                 // If we also have lineup data, render the lineup
                 if (hasLineupData) {
-                    lineup = lineupData;
+                    lineup = createLineup(lineupData);
                     renderLineupTable();
                     renderFieldVisuals();
                     document.getElementById('lineupSection').classList.remove('hidden');
@@ -604,7 +618,7 @@ Jane Doe
 
             // Generate lineup for each quarter
             for (let quarter = 1; quarter <= 4; quarter++) {
-                lineup[quarter] = { positions: {}, bench: [] };
+                lineup[quarter] = createQuarterLineup();
                 const availablePlayers = [...presentPlayers];
 
                 // For each position, find eligible players and select based on:
@@ -736,7 +750,7 @@ Jane Doe
 
             // Reset lineup
             for (let q = 1; q <= 4; q++) {
-                lineup[q] = { positions: {}, bench: [] };
+                lineup[q] = createQuarterLineup();
             }
 
             cells.forEach(cell => {
@@ -839,7 +853,8 @@ Jane Doe
 
             for (let q = 1; q <= 4; q++) {
                 const cell = benchRow.insertCell();
-                cell.textContent = lineup[q].bench.join(', ') || '-';
+                const benchPlayers = lineup[q].bench;
+                cell.textContent = benchPlayers.length > 0 ? benchPlayers.join(', ') : '-';
                 cell.className = 'editable-cell';
                 cell.contentEditable = 'true';
                 cell.dataset.position = 'BENCH';
